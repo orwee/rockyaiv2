@@ -4,6 +4,12 @@ import pandas as pd
 import json
 from datetime import datetime
 import time
+import os
+from PIL import Image
+from io import BytesIO
+from langchain_openai import ChatOpenAI
+from langchain.schema import HumanMessage, AIMessage, SystemMessage
+from langchain.memory import ConversationBufferMemory
 
 # IMPORTANTE: Esta debe ser la primera llamada a Streamlit en el script
 st.set_page_config(
@@ -17,6 +23,23 @@ PRIMARY_COLOR = "#A199DA"
 SECONDARY_COLOR = "#403680"
 BG_COLOR = "#000000"
 ACCENT_COLOR = "#A199DA"
+LOGO_URL = "https://corp.orwee.io/wp-content/uploads/2023/07/cropped-imageonline-co-transparentimage-23-e1689783905238.webp"
+LOGO_USER = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRMM9iuYpLlg4Z4qGzMITpHX9PmdEERT-GHtv7RXnVa7SXaJ6-pdi48oj792H-zPNBpiG0&usqp=CAU"
+
+# Función para cargar imágenes desde URL
+@st.cache_data
+def load_image(url):
+    try:
+        response = requests.get(url)
+        img = Image.open(BytesIO(response.content))
+        return img
+    except Exception as e:
+        st.error(f"Error loading image: {e}")
+        return None
+
+# Cargar avatares
+assistant_avatar = load_image(LOGO_URL)
+user_avatar = load_image(LOGO_USER)
 
 # Apply custom CSS
 st.markdown(
@@ -56,29 +79,6 @@ st.markdown(
             margin-bottom: 15px;
             overflow-y: auto;
             max-height: 400px;
-        }}
-
-        /* User message */
-        .user-message {{
-            background-color: {PRIMARY_COLOR};
-            color: white;
-            border-radius: 10px;
-            padding: 8px 12px;
-            margin: 5px 0;
-            text-align: right;
-            max-width: 75%;
-            margin-left: auto;
-        }}
-
-        /* Bot message */
-        .bot-message {{
-            background-color: rgba(61, 61, 61, 0.7);
-            color: white;
-            border-radius: 10px;
-            padding: 8px 12px;
-            margin: 5px 0;
-            text-align: left;
-            max-width: 75%;
         }}
 
         /* Filter display */
@@ -181,10 +181,32 @@ def get_defi_llama_yields():
     except Exception as e:
         return {"error": f"Exception occurred: {str(e)}"}
 
-# Initialize session state variables for the chat
+# Initialize LangChain components
+@st.cache_resource
+def setup_langchain():
+    try:
+        # Try to read from secrets.toml first
+        api_key = st.secrets.get("openai", {}).get("api_key", None)
+    except:
+        # If not in secrets, read from environment variables
+        api_key = os.environ.get("OPENAI_API_KEY", None)
+
+    if not api_key:
+        st.warning("OpenAI API key not found. AI capabilities will be limited.")
+        return None
+
+    try:
+        llm = ChatOpenAI(temperature=0.7, model="gpt-4o-mini", api_key=api_key)
+        memory = ConversationBufferMemory(return_messages=True)
+        return llm, memory
+    except Exception as e:
+        st.error(f"Error configuring LangChain: {e}")
+        return None, None
+
+# Initialize chat state variables
 def init_chat_state():
-    if 'messages' not in st.session_state:
-        st.session_state.messages = [
+    if 'defi_messages' not in st.session_state:
+        st.session_state.defi_messages = [
             {"role": "assistant", "content": "Hola! Soy tu DeFi Investment Assistant. Puedo ayudarte a encontrar oportunidades de inversión basadas en tus preferencias. ¿Qué tipo de oportunidades estás buscando?"}
         ]
 
@@ -204,22 +226,56 @@ def init_chat_state():
     if 'last_query_time' not in st.session_state:
         st.session_state.last_query_time = None
 
-# Función para procesar mensajes y extraer filtros
-def process_message(message):
-    message_lower = message.lower()
-
-    # Intentamos extraer el token (símbolos como BTC, ETH, USDC, etc.)
+# Integración de LangChain con DeFi Llama
+def process_message_with_langchain(llm, message):
+    # Contexto del sistema para LangChain
+    system_prompt = """
+    Eres un asistente especializado en DeFi que ayuda a los usuarios a encontrar oportunidades de inversión.
+    Tu tarea es extraer los siguientes parámetros del mensaje del usuario:
+    - Token (ej. ETH, BTC, USDC)
+    - Blockchain (ej. Ethereum, Polygon, Solana)
+    - Protocolo (ej. Aave, Curve, Uniswap)
+    - APY mínimo (un porcentaje)
+    - TVL mínimo (un valor en USD)
+    
+    Responde de manera conversacional y solicita cualquier información faltante.
+    """
+    
+    # Crear contexto para LangChain
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=f"""
+        Analiza este mensaje del usuario y extrae los parámetros para buscar oportunidades DeFi:
+        "{message}"
+        
+        Información actual:
+        - Token: {st.session_state.token if st.session_state.token else 'No especificado'}
+        - Blockchain: {st.session_state.blockchain if st.session_state.blockchain else 'No especificado'}
+        - Protocolo: {st.session_state.protocol if st.session_state.protocol else 'No especificado'}
+        - APY mínimo: {st.session_state.min_apy}%
+        - TVL mínimo: ${st.session_state.min_tvl:,.2f}
+        
+        Responde de manera conversacional y actualiza los parámetros según corresponda.
+        """)
+    ]
+    
+    # Obtener respuesta del modelo
+    response = llm.invoke(messages)
+    
+    # Analizar la respuesta para extraer parámetros
+    response_text = response.content
+    
+    # Extraer token (símbolos comunes en cripto)
     token_keywords = ["token", "moneda", "cripto"]
     for keyword in token_keywords:
-        if keyword in message_lower:
+        if keyword.lower() in message.lower():
             # Buscar palabras en mayúsculas que podrían ser tokens
             words = message.split()
             for word in words:
                 if word.isupper() and len(word) >= 2 and len(word) <= 5:
                     st.session_state.token = word
-                    return f"He registrado que estás interesado en el token {word}. ¿Alguna preferencia de blockchain o protocolo?"
 
-    # Intentamos extraer la blockchain
+    # Extraer blockchain
     blockchain_keywords = {
         "ethereum": "Ethereum",
         "polygon": "Polygon",
@@ -233,11 +289,10 @@ def process_message(message):
     }
 
     for keyword, value in blockchain_keywords.items():
-        if keyword in message_lower:
+        if keyword.lower() in message.lower():
             st.session_state.blockchain = value
-            return f"Perfecto, buscaré en la blockchain {value}. ¿Tienes algún protocolo preferido?"
 
-    # Intentamos extraer el protocolo
+    # Extraer protocolo
     protocol_keywords = {
         "aave": "Aave",
         "curve": "Curve",
@@ -248,50 +303,48 @@ def process_message(message):
     }
 
     for keyword, value in protocol_keywords.items():
-        if keyword in message_lower:
+        if keyword.lower() in message.lower():
             st.session_state.protocol = value
-            return f"Bien, buscaré en el protocolo {value}. ¿Tienes algún APY mínimo en mente?"
 
-    # Intentamos extraer el APY mínimo
+    # Extraer APY mínimo
     apy_keywords = ["apy", "rendimiento", "interés", "ganancia", "%"]
     for keyword in apy_keywords:
-        if keyword in message_lower:
+        if keyword.lower() in message.lower():
             # Buscar números cerca de las palabras clave
-            parts = message_lower.split()
+            parts = message.lower().split()
             for i, part in enumerate(parts):
                 if keyword in part and i > 0:
                     try:
                         possible_number = parts[i-1].replace('%', '').replace(',', '.')
                         apy = float(possible_number)
                         st.session_state.min_apy = apy
-                        return f"Entendido, buscaré oportunidades con un APY mínimo del {apy}%. ¿Y cuál sería el TVL (Total Value Locked) mínimo que quieres?"
                     except:
                         pass
 
-    # Intentamos extraer el TVL mínimo
+    # Extraer TVL mínimo
     tvl_keywords = ["tvl", "locked", "bloqueado"]
     for keyword in tvl_keywords:
-        if keyword in message_lower:
+        if keyword.lower() in message.lower():
             # Buscar números cerca de las palabras clave
-            parts = message_lower.split()
+            parts = message.lower().split()
             for i, part in enumerate(parts):
                 if keyword in part and i > 0:
                     try:
                         possible_number = parts[i-1].replace('$', '').replace('k', '000').replace('m', '000000').replace(',', '')
                         tvl = float(possible_number)
                         st.session_state.min_tvl = tvl
-                        return f"Perfecto, buscaré pools con un TVL mínimo de ${tvl:,.2f}. ¿Quieres ver las oportunidades disponibles ahora?"
                     except:
                         pass
 
-    # Si el mensaje contiene palabras que sugieren buscar/mostrar resultados
+    # Verificar si el usuario quiere buscar
     search_keywords = ["buscar", "mostrar", "ver", "encontrar", "resultados", "oportunidades"]
     for keyword in search_keywords:
-        if keyword in message_lower:
-            return search_defi_opportunities()
+        if keyword.lower() in message.lower():
+            result = search_defi_opportunities()
+            if "encontrado" in result:
+                return f"{response_text}\n\n{result}"
 
-    # Si no hemos identificado ningún filtro, preguntamos genéricamente
-    return "Puedo ayudarte a buscar oportunidades de inversión. ¿Puedes especificar qué token, blockchain, protocolo, APY mínimo o TVL mínimo te interesa?"
+    return response_text
 
 # Función para buscar oportunidades basadas en los filtros
 def search_defi_opportunities():
@@ -387,6 +440,9 @@ else:
 
     # Inicializar variables de estado para el chat
     init_chat_state()
+    
+    # Configurar LangChain
+    llm, memory = setup_langchain()
 
     # Main AI Agent content
     st.title("AI Portfolio Agent")
@@ -420,35 +476,42 @@ else:
                 st.session_state.min_apy = 0.0
                 st.session_state.min_tvl = 0.0
                 st.session_state.search_results = None
-                st.session_state.messages.append({"role": "assistant", "content": "He reiniciado todos los filtros. ¿En qué puedo ayudarte ahora?"})
+                st.session_state.defi_messages.append({"role": "assistant", "content": "He reiniciado todos los filtros. ¿En qué puedo ayudarte ahora?"})
                 st.rerun()
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Historial de chat
-        st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
-        for message in st.session_state.messages:
-            if message["role"] == "user":
-                st.markdown(f"<div class='user-message'>{message['content']}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div class='bot-message'>{message['content']}</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        # Mostrar chat usando chat_message para evitar el bucle
+        for message in st.session_state.defi_messages:
+            with st.chat_message(message["role"], avatar=assistant_avatar if message["role"] == "assistant" else user_avatar):
+                st.write(message["content"])
 
-        # Input del usuario
-        user_input = st.text_input("Escribe tu mensaje:", key="user_input")
+        # Input del usuario con chat_input para mantener consistencia
+        user_input = st.chat_input("Escribe tu mensaje aquí...", key="defi_chat_input")
 
         if user_input:
+            # Mostrar mensaje del usuario
+            with st.chat_message("user", avatar=user_avatar):
+                st.write(user_input)
+            
             # Agregar mensaje del usuario al historial
-            st.session_state.messages.append({"role": "user", "content": user_input})
-
-            # Procesar el mensaje y obtener respuesta
-            response = process_message(user_input)
-
-            # Agregar respuesta del asistente al historial
-            st.session_state.messages.append({"role": "assistant", "content": response})
-
-            # Actualizar la interfaz
-            st.rerun()
+            st.session_state.defi_messages.append({"role": "user", "content": user_input})
+            
+            # Procesar con LangChain si está configurado
+            if llm:
+                response = process_message_with_langchain(llm, user_input)
+            else:
+                # Fallback básico si no hay API
+                response = "Lo siento, necesito una clave API de OpenAI para procesar tu consulta de manera inteligente. Puedes intentar buscar directamente usando comandos como 'buscar oportunidades'."
+                if "buscar" in user_input.lower() or "mostrar" in user_input.lower() or "ver" in user_input.lower():
+                    response = search_defi_opportunities()
+            
+            # Mostrar respuesta del asistente
+            with st.chat_message("assistant", avatar=assistant_avatar):
+                st.write(response)
+                
+            # Agregar respuesta al historial
+            st.session_state.defi_messages.append({"role": "assistant", "content": response})
 
         # Mostrar resultados de búsqueda si existen
         if st.session_state.search_results:
