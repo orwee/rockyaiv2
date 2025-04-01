@@ -46,62 +46,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Check if logged in from main app
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-
-if 'user' not in st.session_state:
-    st.session_state.user = None
-
-# User authentication setup - Sample users for testing (same as in main app)
-USERS = {
-    "admin": "admin123",
-    "user1": "password123",
-    "demo": "demo2024"
-}
-
-# Login function
-def login(username, password):
-    if username in USERS and USERS[username] == password:
-        st.session_state.logged_in = True
-        st.session_state.user = username
-        return True
-    else:
-        return False
-
-# Login form
-def show_login_form():
-    st.markdown("<div class='login-container'>", unsafe_allow_html=True)
-    st.markdown("<h2 class='login-title'>DeFi Portfolio Login</h2>", unsafe_allow_html=True)
-
-    # Login inputs
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    col1, col2 = st.columns([1, 1])
-
-    with col1:
-        login_button = st.button("Login")
-
-    with col2:
-        st.markdown("""
-        <div style="font-size: 0.8em; margin-top: 8px;">
-        Test users:<br>
-        - admin/admin123<br>
-        - user1/password123<br>
-        - demo/demo2024
-        </div>
-        """, unsafe_allow_html=True)
-
-    if login_button:
-        if login(username, password):
-            st.success("Login successful!")
-            st.rerun()
-        else:
-            st.error("Invalid username or password")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
 # Check login status
 if not st.session_state.logged_in:
     show_login_form()
