@@ -38,7 +38,7 @@ def load_image(url):
         return None
 
 # Cargar avatares
-assistant_avatar = load_image(LOGO_URL)
+assistant_avatar = None #load_image(LOGO_URL)
 user_avatar = load_image(LOGO_USER)
 
 # Apply custom CSS
