@@ -14,14 +14,14 @@ from langchain.tools import Tool
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
-'''
+
 # IMPORTANTE: Esta debe ser la primera llamada a Streamlit en el script
 st.set_page_config(
     page_title="DeFi Portfolio AI Agent",
     page_icon="🧠",
     layout="wide"
 )
-'''
+
 # Estilo de la página
 PRIMARY_COLOR = "#A199DA"
 SECONDARY_COLOR = "#403680"
