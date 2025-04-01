@@ -39,7 +39,7 @@ def load_image(url):
 
 # Cargar avatares
 assistant_avatar = None #load_image(LOGO_URL)
-user_avatar = load_image(LOGO_USER)
+user_avatar = None #load_image(LOGO_USER)
 
 # Apply custom CSS
 st.markdown(
