@@ -186,7 +186,7 @@ def get_defi_llama_yields():
 def setup_langchain():
     try:
         # Try to read from secrets.toml first
-        api_key = st.secrets.get("openai", {}).get("api_key", None)
+        api_key = st.secrets.get("OPENAI_API_KEY", None)
     except:
         # If not in secrets, read from environment variables
         api_key = os.environ.get("OPENAI_API_KEY", None)
