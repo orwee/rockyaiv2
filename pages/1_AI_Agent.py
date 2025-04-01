@@ -46,17 +46,13 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Check login status
-if not st.session_state.logged_in:
-    show_login_form()
-else:
     # Show logout button in the sidebar
-    st.sidebar.markdown(f"**Logged in as:** {st.session_state.user}")
-    if st.sidebar.button("Logout"):
-        st.session_state.logged_in = False
-        st.session_state.user = None
-        st.rerun()
+st.sidebar.markdown(f"**Logged in as:** {st.session_state.user}")
+if st.sidebar.button("Logout"):
+    st.session_state.logged_in = False
+    st.session_state.user = None
+    st.rerun()
 
-    # Main AI Agent content
-    st.title("AI Portfolio Agent")
-    st.write("This is where the AI agent will be implemented")
+# Main AI Agent content
+st.title("AI Portfolio Agent")
+st.write("This is where the AI agent will be implemented")
