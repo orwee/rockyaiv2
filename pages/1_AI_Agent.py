@@ -38,8 +38,8 @@ def load_image(url):
         return None
 
 # Cargar avatares
-assistant_avatar = None #load_image(LOGO_URL)
-user_avatar = None #load_image(LOGO_USER)
+assistant_avatar = None# load_image(LOGO_URL)
+user_avatar = None#load_image(LOGO_USER)
 
 # Apply custom CSS
 st.markdown(
@@ -76,9 +76,24 @@ st.markdown(
             background-color: rgba(43, 49, 78, 0.7);
             border: 1px solid {PRIMARY_COLOR};
             padding: 15px;
-            margin-bottom: 15px;
+            margin-bottom: 80px; /* Espacio para el input fijo */
             overflow-y: auto;
-            max-height: 400px;
+            max-height: 60vh;
+            min-height: 60vh;
+            display: flex;
+            flex-direction: column-reverse; /* Mensajes más recientes abajo */
+        }}
+
+        /* Input container fijo */
+        .input-container {{
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 10px;
+            background-color: {BG_COLOR};
+            border-top: 1px solid {PRIMARY_COLOR};
+            z-index: 1000;
         }}
 
         /* Filter display */
@@ -237,107 +252,184 @@ def process_message_with_langchain(llm, message):
     - Protocolo (ej. Aave, Curve, Uniswap)
     - APY mínimo (un porcentaje)
     - TVL mínimo (un valor en USD)
-    
+
     Responde de manera conversacional y solicita cualquier información faltante.
+    Si el usuario no menciona explícitamente cambios en estos parámetros, mantén los valores anteriores.
     """
-    
+
     # Crear contexto para LangChain
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=f"""
         Analiza este mensaje del usuario y extrae los parámetros para buscar oportunidades DeFi:
         "{message}"
-        
+
         Información actual:
         - Token: {st.session_state.token if st.session_state.token else 'No especificado'}
         - Blockchain: {st.session_state.blockchain if st.session_state.blockchain else 'No especificado'}
         - Protocolo: {st.session_state.protocol if st.session_state.protocol else 'No especificado'}
         - APY mínimo: {st.session_state.min_apy}%
         - TVL mínimo: ${st.session_state.min_tvl:,.2f}
-        
-        Responde de manera conversacional y actualiza los parámetros según corresponda.
+
+        Responde de manera conversacional y SOLO actualiza los parámetros que el usuario haya mencionado explícitamente.
         """)
     ]
-    
+
     # Obtener respuesta del modelo
     response = llm.invoke(messages)
-    
+
     # Analizar la respuesta para extraer parámetros
     response_text = response.content
-    
+
     # Extraer token (símbolos comunes en cripto)
-    token_keywords = ["token", "moneda", "cripto"]
+    token_keywords = ["token", "moneda", "cripto", "criptomoneda"]
+    token_mentioned = False
     for keyword in token_keywords:
         if keyword.lower() in message.lower():
+            token_mentioned = True
             # Buscar palabras en mayúsculas que podrían ser tokens
             words = message.split()
             for word in words:
-                if word.isupper() and len(word) >= 2 and len(word) <= 5:
+                if word.isupper() and len(word) >= 2 and len(word) <= 6:
                     st.session_state.token = word
+                    break
+
+    # Si se menciona reset o borrar token
+    if ("sin token" in message.lower() or "reset token" in message.lower() or "borrar token" in message.lower()) and token_mentioned:
+        st.session_state.token = None
+
+    # Mapeo de blockchain normalizado
+    blockchain_mapping = {
+        "ethereum": "ethereum",
+        "eth": "ethereum",
+        "polygon": "polygon",
+        "matic": "polygon",
+        "arbitrum": "arbitrum",
+        "arb": "arbitrum",
+        "optimism": "optimism",
+        "op": "optimism",
+        "solana": "solana",
+        "sol": "solana",
+        "avalanche": "avalanche",
+        "avax": "avalanche",
+        "base": "base",
+        "bnb": "bsc",
+        "binance": "bsc",
+        "bsc": "bsc"
+    }
 
     # Extraer blockchain
-    blockchain_keywords = {
-        "ethereum": "Ethereum",
-        "polygon": "Polygon",
-        "arbitrum": "Arbitrum",
-        "optimism": "Optimism",
-        "solana": "Solana",
-        "avalanche": "Avalanche",
-        "base": "Base",
-        "bnb": "BSC",
-        "binance": "BSC"
-    }
-
-    for keyword, value in blockchain_keywords.items():
+    chain_mentioned = False
+    for keyword, value in blockchain_mapping.items():
         if keyword.lower() in message.lower():
+            chain_mentioned = True
             st.session_state.blockchain = value
+            break
+
+    # Si se menciona reset o borrar blockchain
+    if ("sin blockchain" in message.lower() or "reset blockchain" in message.lower() or "borrar blockchain" in message.lower()) and chain_mentioned:
+        st.session_state.blockchain = None
 
     # Extraer protocolo
-    protocol_keywords = {
-        "aave": "Aave",
-        "curve": "Curve",
-        "uniswap": "Uniswap",
-        "compound": "Compound",
-        "sushi": "SushiSwap",
-        "convex": "Convex"
+    protocol_mapping = {
+        "aave": "aave",
+        "curve": "curve",
+        "uniswap": "uniswap",
+        "uni": "uniswap",
+        "compound": "compound",
+        "comp": "compound",
+        "sushi": "sushiswap",
+        "sushiswap": "sushiswap",
+        "convex": "convex",
+        "cvx": "convex",
+        "balancer": "balancer",
+        "bal": "balancer"
     }
 
-    for keyword, value in protocol_keywords.items():
+    protocol_mentioned = False
+    for keyword, value in protocol_mapping.items():
         if keyword.lower() in message.lower():
+            protocol_mentioned = True
             st.session_state.protocol = value
+            break
+
+    # Si se menciona reset o borrar protocolo
+    if ("sin protocolo" in message.lower() or "reset protocolo" in message.lower() or "borrar protocolo" in message.lower()) and protocol_mentioned:
+        st.session_state.protocol = None
 
     # Extraer APY mínimo
-    apy_keywords = ["apy", "rendimiento", "interés", "ganancia", "%"]
+    apy_keywords = ["apy", "rendimiento", "interés", "ganancia", "%", "porcentaje"]
+    apy_mentioned = False
+
+    # Buscar patrones como "APY mayor que X%" o "APY mínimo X%"
     for keyword in apy_keywords:
         if keyword.lower() in message.lower():
-            # Buscar números cerca de las palabras clave
-            parts = message.lower().split()
-            for i, part in enumerate(parts):
-                if keyword in part and i > 0:
+            apy_mentioned = True
+            # Buscar números cerca de las palabras clave usando expresiones regulares
+            import re
+            # Buscar patrones como "X%" o "X %" o "mayor que X" o "mínimo X"
+            patterns = [
+                r'(\d+\.?\d*)[ ]?%',  # "X%" o "X %"
+                r'mayor que (\d+\.?\d*)',  # "mayor que X"
+                r'mínimo (\d+\.?\d*)',  # "mínimo X"
+                r'más de (\d+\.?\d*)'  # "más de X"
+            ]
+
+            for pattern in patterns:
+                matches = re.findall(pattern, message.lower())
+                if matches:
                     try:
-                        possible_number = parts[i-1].replace('%', '').replace(',', '.')
-                        apy = float(possible_number)
-                        st.session_state.min_apy = apy
+                        st.session_state.min_apy = float(matches[0])
+                        break
                     except:
                         pass
+
+    # Reset de APY
+    if ("sin apy" in message.lower() or "reset apy" in message.lower() or "borrar apy" in message.lower()) and apy_mentioned:
+        st.session_state.min_apy = 0.0
 
     # Extraer TVL mínimo
-    tvl_keywords = ["tvl", "locked", "bloqueado"]
+    tvl_keywords = ["tvl", "locked", "bloqueado", "liquidez"]
+    tvl_mentioned = False
+
     for keyword in tvl_keywords:
         if keyword.lower() in message.lower():
-            # Buscar números cerca de las palabras clave
-            parts = message.lower().split()
-            for i, part in enumerate(parts):
-                if keyword in part and i > 0:
+            tvl_mentioned = True
+            import re
+            # Buscar patrones como "$X" o "X USD" o "TVL de X"
+            patterns = [
+                r'\$(\d+\.?\d*[k|K|m|M]?)',  # "$X" o "$Xk" o "$XM"
+                r'(\d+\.?\d*[k|K|m|M]?)[ ]?(?:usd|USD|dólares)', # "X USD" o "Xk USD"
+                r'tvl de (\d+\.?\d*[k|K|m|M]?)', # "TVL de X"
+                r'tvl mínimo (\d+\.?\d*[k|K|m|M]?)' # "TVL mínimo X"
+            ]
+
+            for pattern in patterns:
+                matches = re.findall(pattern, message.lower())
+                if matches:
                     try:
-                        possible_number = parts[i-1].replace('$', '').replace('k', '000').replace('m', '000000').replace(',', '')
-                        tvl = float(possible_number)
-                        st.session_state.min_tvl = tvl
+                        # Convertir k/K o m/M a sus valores numéricos
+                        value_str = matches[0].lower()
+                        multiplier = 1
+
+                        if 'k' in value_str:
+                            multiplier = 1000
+                            value_str = value_str.replace('k', '')
+                        elif 'm' in value_str:
+                            multiplier = 1000000
+                            value_str = value_str.replace('m', '')
+
+                        st.session_state.min_tvl = float(value_str) * multiplier
+                        break
                     except:
                         pass
 
+    # Reset de TVL
+    if ("sin tvl" in message.lower() or "reset tvl" in message.lower() or "borrar tvl" in message.lower()) and tvl_mentioned:
+        st.session_state.min_tvl = 0.0
+
     # Verificar si el usuario quiere buscar
-    search_keywords = ["buscar", "mostrar", "ver", "encontrar", "resultados", "oportunidades"]
+    search_keywords = ["buscar", "mostrar", "ver", "encontrar", "resultados", "oportunidades", "dame", "dame un listado"]
     for keyword in search_keywords:
         if keyword.lower() in message.lower():
             result = search_defi_opportunities()
@@ -379,45 +471,69 @@ def search_defi_opportunities():
         # Aplicamos los filtros
         matches = True
 
+        # Filtro de token (más flexible, busca en symbol y project)
         if st.session_state.token:
-            if not (st.session_state.token in pool.get("symbol", "") or st.session_state.token in pool.get("project", "")):
+            token_found = False
+            # Comprobamos en múltiples campos para mayor flexibilidad
+            symbol = str(pool.get("symbol", "")).upper()
+            project = str(pool.get("project", "")).upper()
+
+            if st.session_state.token.upper() in symbol or st.session_state.token.upper() in project:
+                token_found = True
+
+            if not token_found:
                 matches = False
 
+        # Filtro de blockchain (normalizado para manejar diferentes formatos)
         if st.session_state.blockchain:
-            if st.session_state.blockchain != pool.get("chain", ""):
+            pool_chain = str(pool.get("chain", "")).lower()
+            if st.session_state.blockchain.lower() != pool_chain:
                 matches = False
 
+        # Filtro de protocolo (normalizado para manejar diferentes formatos)
         if st.session_state.protocol:
-            if st.session_state.protocol != pool.get("project", ""):
+            pool_project = str(pool.get("project", "")).lower()
+            if st.session_state.protocol.lower() != pool_project:
                 matches = False
 
+        # Filtro de APY mínimo
         if st.session_state.min_apy > 0:
-            pool_apy = pool.get("apy", 0)
-            if not isinstance(pool_apy, (int, float)):
-                try:
-                    pool_apy = float(pool_apy)
-                except:
+            try:
+                pool_apy = pool.get("apy", 0)
+                if pool_apy is None:
                     pool_apy = 0
+                if not isinstance(pool_apy, (int, float)):
+                    pool_apy = float(pool_apy)
+                if pool_apy < st.session_state.min_apy:
+                    matches = False
+            except (ValueError, TypeError):
+                matches = False  # Si no podemos convertir a número, no coincide
 
-            if pool_apy < st.session_state.min_apy:
-                matches = False
-
+        # Filtro de TVL mínimo
         if st.session_state.min_tvl > 0:
-            pool_tvl = pool.get("tvlUsd", 0)
-            if not isinstance(pool_tvl, (int, float)):
-                try:
-                    pool_tvl = float(pool_tvl)
-                except:
+            try:
+                pool_tvl = pool.get("tvlUsd", 0)
+                if pool_tvl is None:
                     pool_tvl = 0
-
-            if pool_tvl < st.session_state.min_tvl:
-                matches = False
+                if not isinstance(pool_tvl, (int, float)):
+                    pool_tvl = float(pool_tvl)
+                if pool_tvl < st.session_state.min_tvl:
+                    matches = False
+            except (ValueError, TypeError):
+                matches = False  # Si no podemos convertir a número, no coincide
 
         if matches:
             filtered_data.append(pool)
 
-    # Ordenamos por APY descendente
-    filtered_data = sorted(filtered_data, key=lambda x: float(x.get('apy', 0) or 0), reverse=True)
+    # Ordenamos por APY descendente, manejando posibles valores None
+    try:
+        filtered_data = sorted(
+            filtered_data,
+            key=lambda x: float(x.get('apy', 0) or 0),
+            reverse=True
+        )
+    except Exception as e:
+        st.error(f"Error ordenando resultados: {str(e)}")
 
     # Almacenamos los resultados en el estado de la sesión
     st.session_state.search_results = filtered_data
@@ -440,7 +556,7 @@ else:
 
     # Inicializar variables de estado para el chat
     init_chat_state()
-    
+
     # Configurar LangChain
     llm, memory = setup_langchain()
 
@@ -481,37 +597,46 @@ else:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Mostrar chat usando chat_message para evitar el bucle
+        # Contenedor de mensajes (con estilo de ChatGPT)
+        st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
+
+        # Mostrar cada mensaje en el contenedor
         for message in st.session_state.defi_messages:
-            with st.chat_message(message["role"], avatar=assistant_avatar if message["role"] == "assistant" else user_avatar):
+            avatar = assistant_avatar if message["role"] == "assistant" else user_avatar
+            with st.chat_message(message["role"], avatar=avatar):
                 st.write(message["content"])
 
-        # Input del usuario con chat_input para mantener consistencia
-        user_input = st.chat_input("Escribe tu mensaje aquí...", key="defi_chat_input")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        if user_input:
-            # Mostrar mensaje del usuario
-            with st.chat_message("user", avatar=user_avatar):
-                st.write(user_input)
-            
-            # Agregar mensaje del usuario al historial
-            st.session_state.defi_messages.append({"role": "user", "content": user_input})
-            
-            # Procesar con LangChain si está configurado
-            if llm:
-                response = process_message_with_langchain(llm, user_input)
-            else:
-                # Fallback básico si no hay API
-                response = "Lo siento, necesito una clave API de OpenAI para procesar tu consulta de manera inteligente. Puedes intentar buscar directamente usando comandos como 'buscar oportunidades'."
-                if "buscar" in user_input.lower() or "mostrar" in user_input.lower() or "ver" in user_input.lower():
-                    response = search_defi_opportunities()
-            
-            # Mostrar respuesta del asistente
-            with st.chat_message("assistant", avatar=assistant_avatar):
-                st.write(response)
-                
-            # Agregar respuesta al historial
-            st.session_state.defi_messages.append({"role": "assistant", "content": response})
+        # Contenedor de entrada fijo en la parte inferior
+        st.markdown("<div class='input-container'>", unsafe_allow_html=True)
+        # Crear un contenedor para el input que se mantendrá fijo en la parte inferior
+        input_container = st.container()
+
+        with input_container:
+            # Input del usuario
+            user_input = st.chat_input("Escribe tu mensaje aquí...", key="defi_chat_input")
+
+            if user_input:
+                # Agregar mensaje del usuario al historial
+                st.session_state.defi_messages.append({"role": "user", "content": user_input})
+
+                # Procesar con LangChain si está configurado
+                if llm:
+                    response = process_message_with_langchain(llm, user_input)
+                else:
+                    # Fallback básico si no hay API
+                    response = "Lo siento, necesito una clave API de OpenAI para procesar tu consulta de manera inteligente. Puedes intentar buscar directamente usando comandos como 'buscar oportunidades'."
+                    if "buscar" in user_input.lower() or "mostrar" in user_input.lower() or "ver" in user_input.lower():
+                        response = search_defi_opportunities()
+
+                # Agregar respuesta al historial
+                st.session_state.defi_messages.append({"role": "assistant", "content": response})
+
+                # Recargar para mostrar los nuevos mensajes
+                st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # Mostrar resultados de búsqueda si existen
         if st.session_state.search_results:
