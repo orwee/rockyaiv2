@@ -1,144 +1,8 @@
-import streamlit as st
 import pandas as pd
-import datetime
-import time
+import re
 import requests
-from langchain_openai import ChatOpenAI
-from langchain_experimental.agents import create_pandas_dataframe_agent
-from langchain.agents.agent_types import AgentType
-
-# Custom color palette
-PRIMARY_COLOR = "#A199DA"
-SECONDARY_COLOR = "#403680"
-BG_COLOR = "#000000"
-ACCENT_COLOR = "#A199DA"
-LOGO_URL = "https://corp.orwee.io/wp-content/uploads/2023/07/cropped-imageonline-co-transparentimage-23-e1689783905238.webp"
-
-# Cargar avatares
-assistant_avatar = None
-user_avatar = None
-
-# Función para guardar los logs de conversación en session_state
-def save_conversation_log(user_message, assistant_response, visualization_type=None):
-    """
-    Guarda los mensajes de la conversación en session_state y proporciona descarga
-    """
-    # Inicializar el registro de conversaciones si no existe
-    if 'conversation_logs' not in st.session_state:
-        st.session_state.conversation_logs = []
-
-    # Añadir la nueva entrada de log
-    log_entry = {
-        'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'user_message': user_message,
-        'assistant_response': assistant_response,
-        'visualization_type': visualization_type if visualization_type else 'none'
-    }
-
-    # Guardar en session_state
-    st.session_state.conversation_logs.append(log_entry)
-    return True
-
-# Apply custom branding
-def apply_custom_branding():
-    # Custom CSS with Rocky branding
-    css = f"""
-    <style>
-        /* Main background and text */
-        .stApp {{
-            background-color: {BG_COLOR};
-            color: white;
-        }}
-
-        /* Header styling */
-        h1, h2, h3, h4, h5, h6 {{
-            font-family: monospace !important;
-            color: {PRIMARY_COLOR};
-        }}
-
-        /* Custom button styling */
-        .stButton > button {{
-            background-color: {PRIMARY_COLOR} !important;
-            color: white !important;
-            border: none !important;
-            font-family: monospace !important;
-            padding: 10px 15px !important;
-            border-radius: 4px !important;
-            width: 100% !important;
-            text-align: left !important;
-            font-size: 14px !important;
-            margin-bottom: 8px !important;
-        }}
-
-        .stButton > button:hover {{
-            background-color: {SECONDARY_COLOR} !important;
-        }}
-
-        /* Sidebar styling */
-        section[data-testid="stSidebar"] {{
-            background-color: {BG_COLOR};
-            border-right: 1px solid {PRIMARY_COLOR};
-        }}
-
-        /* Add your logo */
-        .logo-container {{
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin-bottom: 10px;
-            text-align: center;
-        }}
-
-        .logo-container img {{
-            width: 30%;
-            margin-bottom: 10px;
-        }}
-
-        .app-title {{
-            font-family: monospace;
-            font-weight: bold;
-            font-size: 1.5em;
-            color: {PRIMARY_COLOR};
-            font-size: 14px !important;
-        }}
-
-        /* Import IBM Plex Mono font */
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap');
-
-        /* Metrics and key figures */
-        .metric-value {{
-            color: {PRIMARY_COLOR};
-            font-weight: bold;
-        }}
-
-        /* Chat container */
-        .chat-container {{
-            border-radius: 10px;
-            background-color: rgba(43, 49, 78, 0.7);
-            border: 1px solid {PRIMARY_COLOR};
-            padding: 15px;
-            margin-bottom: 80px; /* Espacio para el input fijo */
-            overflow-y: auto;
-            max-height: 60vh;
-            min-height: 60vh;
-            display: flex;
-            flex-direction: column-reverse; /* Mensajes más recientes abajo */
-        }}
-
-        /* Input container fijo */
-        .input-container {{
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 10px;
-            background-color: {BG_COLOR};
-            border-top: 1px solid {PRIMARY_COLOR};
-            z-index: 1000;
-        }}
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
+import json
+import streamlit as st
 
 # Page configuration
 st.set_page_config(
@@ -147,167 +11,407 @@ st.set_page_config(
     layout="wide"
 )
 
-# Apply branding
-apply_custom_branding()
+# Clase para el agente con memoria
+class CryptoAgent:
+    def __init__(self):
+        # Estado del agente - memoria para almacenar las variables
+        self.state = {
+            "blockchain": None,
+            "token": None,
+            "tvl_min": None,
+            "apy_min": None,
+            "protocol": None
+        }
 
-# Initialize session states
-if 'messages' not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I'm Rocky, your DeFi Assistant built with OI (Orwee Intelligence). How can I help you today?"}
-    ]
+        # Almacenar las últimas oportunidades encontradas
+        self.last_opportunities = []
 
-if 'defi_df' not in st.session_state:
-    st.session_state.defi_df = None
+        # Mapeo de nombres de blockchain para DeFiLlama
+        self.chain_mapping = {
+            "ethereum": "Ethereum",
+            "arbitrum": "Arbitrum",
+            "solana": "Solana",
+            "avalanche": "Avalanche",
+            "polygon": "Polygon",
+            "binance": "BSC",
+            "bsc": "BSC",
+            "optimism": "Optimism",
+            "fantom": "Fantom",
+            "cardano": "Cardano"
+        }
 
-if 'df_agent' not in st.session_state:
-    st.session_state.df_agent = None
-
-if 'last_query_time' not in st.session_state:
-    st.session_state.last_query_time = None
-
-# DeFi Llama API function
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_defi_llama_yields():
-    """Consulta pools de https://yields.llama.fi/pools."""
-    url = "https://yields.llama.fi/pools"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json().get("data", [])
-            df = pd.DataFrame(data)
-            return df
+    def process_tvl_value(self, value_str):
+        """Procesa valores de TVL con K y M"""
+        value_str = value_str.strip().lower()
+        if value_str.endswith('k'):
+            return str(float(value_str[:-1]) * 1000)
+        elif value_str.endswith('m'):
+            return str(float(value_str[:-1]) * 1000000)
         else:
-            return pd.DataFrame({"error": [f"Error {response.status_code}: {response.text}"]})
-    except Exception as e:
-        return pd.DataFrame({"error": [f"Exception occurred: {str(e)}"]})
+            return value_str
 
-# Configure the LangChain agent for DeFi Llama data
-@st.cache_resource
-def setup_defillama_agent(_df):
-    api_key = st.secrets.get("OPENAI_API_KEY", None)
+    def detect_all_variables(self, query):
+        """Detecta todas las variables mencionadas en la consulta"""
+        query_lower = query.lower()
+        updates = {}
 
-    if not api_key:
-        st.warning("OpenAI API key not found. Smart assistant functionality will be limited.")
+        # Detectar blockchain
+        for chain_key, chain_value in self.chain_mapping.items():
+            blockchain_patterns = [
+                r'blockchain\s+(?:de\s+)?'+chain_key,
+                r'en\s+'+chain_key,
+                r'de\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?'+chain_key,
+                chain_key+r'\s+(?:blockchain|cadena|red)',
+                r'selecciona(?:r)?\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?'+chain_key,
+                r'select\s+'+chain_key,
+                r'\b'+chain_key+r'\b'
+            ]
+
+            for pattern in blockchain_patterns:
+                if re.search(pattern, query_lower):
+                    updates["blockchain"] = chain_key
+                    break
+
+            if "blockchain" in updates:
+                break
+
+        # Detectar token
+        token_patterns = [
+            r'token\s+(?:de\s+)?(\w+)',
+            r'el\s+token\s+(?:de\s+)?(\w+)',
+            r'(\w+)\s+token',
+            r'selecciona(?:r)?\s+(?:el\s+)?token\s+(?:de\s+)?(\w+)'
+        ]
+
+        for pattern in token_patterns:
+            token_match = re.search(pattern, query_lower)
+            if token_match:
+                token = token_match.group(1)
+                if token not in ["a", "el", "la", "los", "las", "de", "del"]:
+                    updates["token"] = token
+                    break
+
+        # Detectar protocolo
+        protocol_patterns = [
+            r'protocol(?:o)?\s+(?:de\s+)?(\w+)',
+            r'(?:en|del|con)\s+protocol(?:o)?\s+(?:de\s+)?(\w+)',
+            r'(?:el|del)\s+protocol(?:o)?\s+(?:de\s+)?(\w+)',
+            r'(\w+)\s+protocol(?:o)?',
+            r'selecciona(?:r)?\s+(?:el\s+)?protocol(?:o)?\s+(?:de\s+)?(\w+)'
+        ]
+
+        for pattern in protocol_patterns:
+            protocol_match = re.search(pattern, query_lower)
+            if protocol_match:
+                protocol = protocol_match.group(1)
+                if protocol not in ["a", "el", "la", "los", "las", "de", "del"]:
+                    updates["protocol"] = protocol
+                    break
+
+        # Detectar TVL mínimo con soporte para K y M
+        tvl_patterns = [
+            r'tvl\s+(?:min(?:imo)?|mayor|superior)\s+(?:a|de)?\s*(\d+(?:\.\d+)?(?:[km])?)',
+            r'tvl\s+de\s+(\d+(?:\.\d+)?(?:[km])?)',
+            r'tvl\s+minimo\s+de\s+(\d+(?:\.\d+)?(?:[km])?)',
+            r'minimo\s+(?:de\s+)?tvl\s+(?:de\s+)?(\d+(?:\.\d+)?(?:[km])?)',
+            r'tvl\s+min(?:imo)?\s+(\d+(?:\.\d+)?(?:[km])?)'
+        ]
+
+        for pattern in tvl_patterns:
+            tvl_match = re.search(pattern, query_lower)
+            if tvl_match:
+                tvl_value = tvl_match.group(1)
+                updates["tvl_min"] = self.process_tvl_value(tvl_value)
+                break
+
+        # Detectar APY mínimo
+        apy_patterns = [
+            r'apy\s+(?:min(?:imo)?|mayor|superior)\s+(?:a|de)?\s*(\d+(?:\.\d+)?)',
+            r'apy\s+de\s+(\d+(?:\.\d+)?)',
+            r'apy\s+minimo\s+de\s+(\d+(?:\.\d+)?)',
+            r'minimo\s+(?:de\s+)?apy\s+(?:de\s+)?(\d+(?:\.\d+)?)',
+            r'apy\s+min(?:imo)?\s+(\d+(?:\.\d+)?)'
+        ]
+
+        for pattern in apy_patterns:
+            apy_match = re.search(pattern, query_lower)
+            if apy_match:
+                updates["apy_min"] = apy_match.group(1)
+                break
+
+        return updates
+
+    def update_state(self, updates):
+        """Actualiza el estado con las variables detectadas"""
+        if not updates:
+            return None
+
+        messages = []
+        for key, value in updates.items():
+            self.state[key] = value
+
+            if key == "blockchain":
+                messages.append(f"Blockchain actualizado a: {value}")
+            elif key == "token":
+                messages.append(f"Token actualizado a: {value}")
+            elif key == "tvl_min":
+                messages.append(f"TVL minimo actualizado a: {value}$")
+            elif key == "apy_min":
+                messages.append(f"APY minimo actualizado a: {value}%")
+            elif key == "protocol":
+                messages.append(f"Protocolo actualizado a: {value}")
+
+        return "\n".join(messages)
+
+    def detect_position_request(self, query):
+        """Detecta si el usuario está pidiendo información detallada sobre una posición específica"""
+        query_lower = query.lower()
+
+        # Eliminar comillas y paréntesis para la detección
+        query_clean = re.sub(r'[\'"\(\)]', '', query_lower)
+
+        # Patrones para detectar consultas sobre posiciones específicas
+        position_patterns = [
+            r'(?:mas|más)\s*info(?:rmacion|rmación)?\s*(?:de|sobre)?\s*(?:la)?\s*(?:posicion|posición)?\s*(\d+)',
+            r'info(?:rmacion|rmación)?\s*(?:de|sobre)?\s*(?:la)?\s*(?:posicion|posición)?\s*(\d+)',
+            r'detalle(?:s)?\s*(?:de|sobre)?\s*(?:la)?\s*(?:posicion|posición)?\s*(\d+)',
+            r'dame\s*(?:mas|más)?\s*(?:de|sobre)?\s*(?:la)?\s*(?:posicion|posición)?\s*(\d+)',
+            r'ver\s*(?:la)?\s*(?:posicion|posición)?\s*(\d+)',
+            r'mostrar\s*(?:la)?\s*(?:posicion|posición)?\s*(\d+)',
+            r'detalles\s*(?:del|de la|de)?\s*(\d+)',
+            r'mas\s*sobre\s*(?:el|la)?\s*(\d+)',
+            r'informacion\s*(?:del|de la)?\s*(\d+)'
+        ]
+
+        for pattern in position_patterns:
+            position_match = re.search(pattern, query_clean)
+            if position_match:
+                try:
+                    position = int(position_match.group(1))
+                    # Ajustar a base 0 para indexar el array
+                    return position - 1
+                except ValueError:
+                    return None
+
         return None
 
-    try:
-        llm = ChatOpenAI(temperature=0, model="gpt-4o-mini", api_key=api_key)
-        agent = create_pandas_dataframe_agent(
-            llm,
-            _df,
-            verbose=True,
-            agent_type=AgentType.OPENAI_FUNCTIONS,
-            handle_parsing_errors=True,
-            allow_dangerous_code=True
-        )
-        return agent
-    except Exception as e:
-        st.error(f"Error configuring the DeFi Llama agent: {e}")
-        return None
-
-# Function to process DeFi Llama queries
-def process_defillama_query(query):
-    # Refresh data if needed
-    current_time = time.time()
-    if st.session_state.defi_df is None or st.session_state.last_query_time is None or current_time - st.session_state.last_query_time > 300:
-        with st.spinner("Fetching latest DeFi data..."):
-            st.session_state.defi_df = get_defi_llama_yields()
-            st.session_state.last_query_time = current_time
-            # Setup agent with fresh data
-            if st.session_state.defi_df is not None and not st.session_state.defi_df.empty:
-                st.session_state.df_agent = setup_defillama_agent(st.session_state.defi_df)
-
-    # Use agent to process query
-    if st.session_state.df_agent:
+    def search_defi_opportunities(self):
+        """Busca oportunidades DeFi que cumplan con los criterios actuales"""
         try:
-            # Enhance the query for DeFi Llama context
-            enhanced_query = f"""
-            Based on the DeFi Llama yields data, {query}.
+            # Hacer la llamada a la API de DeFiLlama
+            response = requests.get('https://yields.llama.fi/pools')
 
-            When analyzing this data:
-            1. If the query mentions a token, chain, protocol, APY or TVL, filter accordingly
-            2. For 'best' or 'top' queries, sort by APY in descending order
-            3. Always limit results to 5 entries unless otherwise specified
-            4. Format amounts with $ and % signs appropriately
-            5. Provide specific investment insights and strategies when possible
-            """
+            if response.status_code != 200:
+                return f"Error al consultar la API de DeFiLlama: {response.status_code}"
 
-            response = st.session_state.df_agent.run(enhanced_query)
-            return response
+            data = response.json()
+
+            if data["status"] != "success" or "data" not in data:
+                return "Error en la respuesta de la API de DeFiLlama"
+
+            # Convertir los datos a un DataFrame para facilitar el filtrado
+            opportunities = pd.DataFrame(data["data"])
+
+            # Aplicar filtros según las variables de estado
+            filtered_opps = opportunities.copy()
+
+            if self.state["blockchain"]:
+                chain_name = self.chain_mapping.get(self.state["blockchain"].lower(), self.state["blockchain"])
+                filtered_opps = filtered_opps[filtered_opps['chain'].str.lower() == chain_name.lower()]
+
+            if self.state["protocol"]:
+                filtered_opps = filtered_opps[filtered_opps['project'].str.lower() == self.state["protocol"].lower()]
+
+            # Filtrar por símbolo del token
+            if self.state["token"]:
+                filtered_opps = filtered_opps[filtered_opps['symbol'].str.lower().str.contains(self.state["token"].lower())]
+
+            # Filtrar por TVL mínimo
+            if self.state["tvl_min"]:
+                filtered_opps = filtered_opps[filtered_opps['tvlUsd'] >= float(self.state["tvl_min"])]
+
+            if self.state["apy_min"]:
+                filtered_opps = filtered_opps[filtered_opps['apy'] >= float(self.state["apy_min"])]
+
+            # Ordenar por APY descendente
+            filtered_opps = filtered_opps.sort_values(by='apy', ascending=False)
+
+            # Seleccionar las 5 mejores oportunidades
+            top_opportunities = filtered_opps.head(5)
+
+            if top_opportunities.empty:
+                self.last_opportunities = []
+                return None, "No se encontraron oportunidades que cumplan con los criterios actuales."
+
+            # Guardar las oportunidades completas para consultas detalladas
+            self.last_opportunities = top_opportunities.to_dict('records')
+
+            # Preparar los datos para mostrar en Streamlit
+            results = []
+            for i, opp in enumerate(self.last_opportunities):
+                result = {
+                    "posicion": i + 1,
+                    "chain": opp["chain"],
+                    "project": opp["project"],
+                    "symbol": opp["symbol"],
+                    "tvlUsd": f"${opp['tvlUsd']:,.2f}",
+                    "apy": f"{opp['apy']:.2f}%",
+                    "ilRisk": opp["ilRisk"],
+                    "exposure": opp["exposure"]
+                }
+                results.append(result)
+
+            return results, None  # Devolver resultados y None para el error
+
         except Exception as e:
-            return f"Error processing your query: {str(e)}"
+            return None, f"Error al buscar oportunidades DeFi: {str(e)}"
+
+    def get_position_details(self, position_index):
+        """Obtiene los detalles completos de una posición específica"""
+        if not self.last_opportunities or position_index < 0 or position_index >= len(self.last_opportunities):
+            return None, "Posicion no disponible. Por favor, primero busca oportunidades."
+
+        # Obtener la posición solicitada
+        position = self.last_opportunities[position_index]
+
+        # Formatear todos los datos disponibles
+        formatted_position = {}
+        for key, value in position.items():
+            if key == 'tvlUsd':
+                formatted_position[key] = f"${value:,.2f}"
+            elif key in ['apy', 'apyBase', 'apyReward', 'apyPct1D', 'apyPct7D', 'apyPct30D', 'apyMean30d']:
+                if value is not None:
+                    formatted_position[key] = f"{value:.2f}%"
+                else:
+                    formatted_position[key] = "No disponible"
+            elif key == 'rewardTokens' and value:
+                formatted_position[key] = ", ".join(value) if value else "Ninguno"
+            elif key == 'underlyingTokens' and value:
+                formatted_position[key] = ", ".join(value) if value else "Ninguno"
+            else:
+                formatted_position[key] = value
+
+        return formatted_position, None  # Devolver detalles y None para el error
+
+    def process_query(self, query):
+        """Procesa la consulta del usuario de manera inteligente"""
+        query_lower = query.lower()
+
+        # Verificar si es una solicitud de reseteo
+        if any(word in query_lower for word in ["reset", "resetear", "borrar", "limpiar", "reiniciar"]):
+            self.reset_state()
+            return "Variables reseteadas. Ahora puedes establecer nuevos criterios de búsqueda."
+
+        # Verificar si el usuario está pidiendo detalles sobre una posición específica
+        position_index = self.detect_position_request(query)
+        if position_index is not None:
+            details, error = self.get_position_details(position_index)
+            if error:
+                return error
+            return details, True  # Detalles y True para indicar que es detalle de posición
+
+        # Detectar y actualizar todas las variables mencionadas en la consulta
+        updates = self.detect_all_variables(query)
+        update_message = None
+        if updates:
+            update_message = self.update_state(updates)
+
+        # Buscar y devolver resultados
+        results, error = self.search_defi_opportunities()
+
+        if error:
+            return error
+
+        # Combinar mensajes y resultados
+        if update_message:
+            return update_message, results
+        else:
+            return "Búsqueda realizada con éxito", results
+
+    def reset_state(self):
+        """Resetea todas las variables a None"""
+        for key in self.state:
+            self.state[key] = None
+        self.last_opportunities = []
+
+# Inicialización del estado de sesión
+if "agent" not in st.session_state:
+    st.session_state.agent = CryptoAgent()
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Título y descripción
+st.title("🚀 Rocky - DeFi Assistant")
+st.markdown("""
+Asistente de DeFi que te ayuda a encontrar las mejores oportunidades según tus criterios.
+Simplemente dime qué buscas y te mostraré opciones que cumplan tus requisitos.
+""")
+
+# Sidebar con variables actuales
+st.sidebar.header("Criterios actuales")
+if st.session_state.agent:
+    agent = st.session_state.agent
+    st.sidebar.markdown(f"**Blockchain:** {agent.state['blockchain'] or 'No especificado'}")
+    st.sidebar.markdown(f"**Token:** {agent.state['token'] or 'No especificado'}")
+    st.sidebar.markdown(f"**TVL mínimo:** {agent.state['tvl_min'] + '$' if agent.state['tvl_min'] else 'No especificado'}")
+    st.sidebar.markdown(f"**APY mínimo:** {agent.state['apy_min'] + '%' if agent.state['apy_min'] else 'No especificado'}")
+    st.sidebar.markdown(f"**Protocolo:** {agent.state['protocol'] or 'No especificado'}")
+
+    if st.sidebar.button("Resetear criterios"):
+        agent.reset_state()
+        st.sidebar.success("Criterios reseteados")
+        st.experimental_rerun()
+
+# Mostrar mensajes anteriores
+for message in st.session_state.messages:
+    if message["role"] == "user":
+        st.chat_message("user").write(message["content"])
     else:
-        return "I couldn't access the DeFi Llama data. Please try again later."
+        st.chat_message("assistant").write(message["content"])
 
-# Sidebar for branding
-with st.sidebar:
-    # Logo and title in sidebar
-    st.markdown(
-        f"""
-        <div class="logo-container">
-            <img src="{LOGO_URL}" alt="Rocky Logo">
-            <div class="app-title">Rocky - DeFi Assistant</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+        # Si hay tabla de resultados, mostrarla
+        if "data" in message and message["data"]:
+            if isinstance(message["data"], list):
+                # Mostrar tabla de resultados
+                df = pd.DataFrame(message["data"])
+                st.dataframe(df, use_container_width=True)
+            elif isinstance(message["data"], dict):
+                # Mostrar detalles de posición
+                st.json(message["data"])
 
-    st.markdown("---")  # Separador después del logo
+# Input del usuario
+prompt = st.chat_input("¿Qué quieres buscar? (Ej: 'Token ETH en Arbitrum con TVL mínimo 1M')")
 
-    # Área para logs de conversación
-    if 'conversation_logs' in st.session_state and st.session_state.conversation_logs:
-        # Convertir logs a DataFrame
-        logs_df = pd.DataFrame(st.session_state.conversation_logs)
-
-        # Botón para descargar logs
-        csv_data = logs_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Descargar logs",
-            data=csv_data,
-            file_name=f"rocky_logs_{datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
-
-        # Opción para ver logs
-        if st.checkbox("Ver logs de esta sesión"):
-            st.dataframe(
-                logs_df[['timestamp', 'user_message']],
-                use_container_width=True
-            )
-
-# Contenedor de mensajes (con estilo de ChatGPT)
-st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
-
-# Mostrar cada mensaje en el contenedor
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"], avatar=assistant_avatar if msg["role"] == "assistant" else user_avatar):
-        st.write(msg["content"])
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# Contenedor de entrada fijo en la parte inferior
-st.markdown("<div class='input-container'>", unsafe_allow_html=True)
-input_container = st.container()
-
-with input_container:
-    # Input del usuario
-    prompt = st.chat_input("Type your query...", key="chat_input")
-st.markdown("</div>", unsafe_allow_html=True)
-
-# Procesar entrada del usuario (aquí puedes integrar tu lógica de procesamiento)
 if prompt:
-    # Agregar mensaje del usuario a la conversación
+    # Agregar mensaje del usuario
     st.session_state.messages.append({"role": "user", "content": prompt})
+    st.chat_message("user").write(prompt)
 
-    # Aquí podrías agregar la lógica para que el asistente procese la consulta
-    # Por ejemplo, usando el agent de DeFi Llama para procesar consultas relacionadas
-    response = process_defillama_query(prompt)
+    # Procesar la consulta
+    agent = st.session_state.agent
+    response = agent.process_query(prompt)
 
-    # Agregar respuesta del asistente
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    # Verificar si la respuesta contiene detalles de posición
+    if isinstance(response, tuple) and len(response) == 2:
+        message, data = response
 
-    # Guardar en logs
-    save_conversation_log(prompt, response)
+        if isinstance(data, bool) and data:  # Es detalle de posición
+            st.session_state.messages.append({"role": "assistant", "content": f"Detalles de la posición:", "data": message})
+            st.chat_message("assistant").write("Detalles de la posición:")
+            st.json(message)
+        else:
+            # Es resultado normal
+            st.session_state.messages.append({"role": "assistant", "content": message, "data": data})
+            st.chat_message("assistant").write(message)
 
-    # Forzar recarga para mostrar nuevos mensajes
-    st.rerun()
+            if data:
+                df = pd.DataFrame(data)
+                st.dataframe(df, use_container_width=True)
+    else:
+        # Es un mensaje simple
+        st.session_state.messages.append({"role": "assistant", "content": response, "data": None})
+        st.chat_message("assistant").write(response)
+
+    # Actualizar sidebar
+    st.experimental_rerun()
