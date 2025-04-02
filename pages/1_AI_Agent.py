@@ -6,6 +6,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
+import random
 
 # Page configuration
 st.set_page_config(
@@ -58,7 +59,7 @@ class CryptoAgent:
         """Detecta todas las variables mencionadas en la consulta"""
         query_lower = query.lower()
         updates = {}
-    
+
         # PRIMERO detectar token para evitar conflictos con blockchain
         # Detectar token (priorizar patrones que mencionan explícitamente "token")
         token_patterns = [
@@ -70,7 +71,7 @@ class CryptoAgent:
             r'encontrar?\s+(?:el\s+)?token\s+(?:de\s+)?(\w+)',
             r'busca\s+(?:el\s+)?token\s+(?:de\s+)?(\w+)'
         ]
-    
+
         for pattern in token_patterns:
             token_match = re.search(pattern, query_lower)
             if token_match:
@@ -78,7 +79,7 @@ class CryptoAgent:
                 if token and token not in ["a", "el", "la", "los", "las", "de", "del"]:
                     updates["token"] = token
                     break
-    
+
         # Luego detectar blockchain, evitando detectar tokens como blockchains
         if "token" not in updates:  # Solo buscar blockchain si no se detectó token explícitamente
             for chain_key, chain_value in self.chain_mapping.items():
@@ -91,15 +92,15 @@ class CryptoAgent:
                     r'select\s+'+chain_key,
                     r'\b'+chain_key+r'\b'
                 ]
-    
+
                 for pattern in blockchain_patterns:
                     if re.search(pattern, query_lower):
                         updates["blockchain"] = chain_key
                         break
-    
+
                 if "blockchain" in updates:
                     break
-    
+
             # Detectar blockchain no soportada solo si no se detectó token
             blockchain_patterns = [
                 r'blockchain\s+(?:de\s+)?(\w+)',
@@ -108,7 +109,7 @@ class CryptoAgent:
                 r'(\w+)\s+(?:blockchain|cadena|red)',
                 r'selecciona(?:r)?\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?(\w+)'
             ]
-    
+
             if "blockchain" not in updates:
                 for pattern in blockchain_patterns:
                     blockchain_match = re.search(pattern, query_lower)
@@ -116,7 +117,7 @@ class CryptoAgent:
                         chain = blockchain_match.group(1)
                         if chain not in self.chain_mapping and chain not in ["a", "el", "la", "los", "las", "de", "del"]:
                             return {"error": f"Blockchain '{chain}' no soportada. Las blockchains disponibles son: {', '.join(self.chain_mapping.keys())}"}
-    
+
         # Detectar protocolo
         protocol_patterns = [
             r'protocol(?:o)?\s+(?:de\s+)?(\w+)',
@@ -125,7 +126,7 @@ class CryptoAgent:
             r'(\w+)\s+protocol(?:o)?',
             r'selecciona(?:r)?\s+(?:el\s+)?protocol(?:o)?\s+(?:de\s+)?(\w+)'
         ]
-    
+
         for pattern in protocol_patterns:
             protocol_match = re.search(pattern, query_lower)
             if protocol_match:
@@ -133,7 +134,7 @@ class CryptoAgent:
                 if protocol not in ["a", "el", "la", "los", "las", "de", "del"]:
                     updates["protocol"] = protocol
                     break
-    
+
         # Detectar TVL mínimo con soporte para K y M
         tvl_patterns = [
             r'tvl\s+(?:min(?:imo)?|mayor|superior)\s+(?:a|de)?\s*(\d+(?:\.\d+)?(?:[km])?)',
@@ -142,14 +143,14 @@ class CryptoAgent:
             r'minimo\s+(?:de\s+)?tvl\s+(?:de\s+)?(\d+(?:\.\d+)?(?:[km])?)',
             r'tvl\s+min(?:imo)?\s+(\d+(?:\.\d+)?(?:[km])?)'
         ]
-    
+
         for pattern in tvl_patterns:
             tvl_match = re.search(pattern, query_lower)
             if tvl_match:
                 tvl_value = tvl_match.group(1)
                 updates["tvl_min"] = self.process_tvl_value(tvl_value)
                 break
-    
+
         # Detectar APY mínimo
         apy_patterns = [
             r'apy\s+(?:min(?:imo)?|mayor|superior)\s+(?:a|de)?\s*(\d+(?:\.\d+)?)',
@@ -158,13 +159,13 @@ class CryptoAgent:
             r'minimo\s+(?:de\s+)?apy\s+(?:de\s+)?(\d+(?:\.\d+)?)',
             r'apy\s+min(?:imo)?\s+(\d+(?:\.\d+)?)'
         ]
-    
+
         for pattern in apy_patterns:
             apy_match = re.search(pattern, query_lower)
             if apy_match:
                 updates["apy_min"] = apy_match.group(1)
                 break
-    
+
         # Detectar búsqueda libre de token (si no se ha detectado mediante patrones)
         if "token" not in updates and not any(key in updates for key in ["blockchain", "tvl_min", "apy_min", "protocol", "error"]):
             # Verificar si hay palabras clave de búsqueda
@@ -174,12 +175,12 @@ class CryptoAgent:
                 common_words = ["me", "un", "una", "el", "la", "los", "las", "de", "del", "por", "para", "con", "y", "o", "a", "al", "se", "si", "en", "que", "por", "favor"]
                 for word in search_keywords + common_words:
                     query_lower = query_lower.replace(f" {word} ", " ")
-    
+
                 # Limpiar y obtener palabras que podrían ser tokens
                 tokens = query_lower.strip().split()
                 if tokens:
                     updates["token"] = tokens[0]  # Tomar la primera palabra como token
-    
+
         return updates
 
     def update_state(self, updates):
@@ -191,22 +192,12 @@ class CryptoAgent:
         if "error" in updates:
             return updates["error"]
 
-        messages = []
+        # Actualizar el estado sin retornar mensajes
         for key, value in updates.items():
             self.state[key] = value
 
-            if key == "blockchain":
-                messages.append(f"Blockchain actualizado a: {value}")
-            elif key == "token":
-                messages.append(f"Token actualizado a: {value}")
-            elif key == "tvl_min":
-                messages.append(f"TVL minimo actualizado a: {value}$")
-            elif key == "apy_min":
-                messages.append(f"APY minimo actualizado a: {value}%")
-            elif key == "protocol":
-                messages.append(f"Protocolo actualizado a: {value}")
-
-        return "\n".join(messages)
+        # No retornamos mensaje de actualización, solo actualizamos silenciosamente
+        return ""
 
     def detect_position_request(self, query):
         """Detecta si el usuario está pidiendo información detallada sobre una posición específica"""
@@ -239,11 +230,11 @@ class CryptoAgent:
                     return None
 
         return None
-    
+
     def detect_chart_request(self, query):
         """Detecta si el usuario está pidiendo un gráfico comparativo"""
         query_lower = query.lower()
-        
+
         # Patrones para detectar solicitudes de gráficos
         chart_patterns = [
             r'(?:haz|crea|genera|muestra|visualiza)(?:me)?\s+(?:un)?\s*(?:grafico|gráfico|chart|visualizacion|visualización)',
@@ -252,12 +243,49 @@ class CryptoAgent:
             r'(?:grafico|gráfico|chart)\s+(?:comparativo|de comparacion|comparación)',
             r'(?:evolución|evolucion)\s+(?:del|de la|de)?\s*apy'
         ]
-        
+
         for pattern in chart_patterns:
             if re.search(pattern, query_lower):
                 return True
-                
+
         return False
+
+    def get_ai_response(self, context):
+        """Genera respuestas conversacionales según el contexto"""
+        search_responses = [
+            "Analizando datos de la blockchain en tiempo real...",
+            "Explorando las oportunidades DeFi disponibles ahora mismo...",
+            "Rastreando los mejores rendimientos en el ecosistema cripto...",
+            "Consultando Smart Contracts en múltiples blockchains...",
+            "Procesando datos on-chain para encontrar las mejores opciones...",
+            "Evaluando pools de liquidez y sus rendimientos actuales...",
+            "Comparando protocolos DeFi según tus criterios...",
+            "Buscando oportunidades que maximicen tu APY con el menor riesgo..."
+        ]
+
+        details_responses = [
+            "Profundizando en los datos de esta posición...",
+            "Analizando métricas detalladas de este protocolo...",
+            "Extrayendo información completa de este Smart Contract...",
+            "Verificando la composición y seguridad de esta pool...",
+            "Calculando estadísticas históricas de rendimiento..."
+        ]
+
+        chart_responses = [
+            "Visualizando tendencias históricas para estas posiciones...",
+            "Generando análisis comparativo de rendimientos en el tiempo...",
+            "Trazando la evolución del APY durante el período seleccionado...",
+            "Creando visualización para evaluar la estabilidad del rendimiento..."
+        ]
+
+        if context == "search":
+            return random.choice(search_responses)
+        elif context == "details":
+            return random.choice(details_responses)
+        elif context == "chart":
+            return random.choice(chart_responses)
+        else:
+            return "Procesando tu solicitud en el ecosistema DeFi..."
 
     def search_defi_opportunities(self):
         """Busca oportunidades DeFi que cumplan con los criterios actuales"""
@@ -362,55 +390,55 @@ class CryptoAgent:
         detail_df_transposed.columns = ['Característica', 'Valor']
 
         return detail_df_transposed, None  # Devolver detalles y None para el error
-    
+
     def generate_comparative_chart(self):
         """Genera un gráfico comparativo de la evolución del APY para las posiciones encontradas"""
         if not self.last_opportunities:
             return None, "No hay posiciones para comparar. Primero realiza una búsqueda."
-    
+
         try:
             # Obtener datos históricos de cada posición
             position_data = []
             legends = []
-    
+
             for i, position in enumerate(self.last_opportunities):
                 if 'pool' not in position:
                     continue
-    
+
                 pool_id = position['pool']
                 url = f'https://yields.llama.fi/chart/{pool_id}'
-    
+
                 response = requests.get(url)
                 if response.status_code != 200:
                     continue
-    
+
                 data = response.json()
                 if data["status"] != "success" or "data" not in data:
                     continue
-    
+
                 # Crear un DataFrame para esta posición
                 pool_df = pd.DataFrame(data["data"])
-    
+
                 # Convertir timestamp a datetime y eliminar información de zona horaria
                 pool_df['timestamp'] = pd.to_datetime(pool_df['timestamp']).dt.tz_localize(None)
-    
+
                 # Filtrar para los últimos 7 días
                 last_7_days = datetime.now() - timedelta(days=7)
                 pool_df = pool_df[pool_df['timestamp'] >= last_7_days]
-    
+
                 # Si hay datos, añadirlos a la lista
                 if not pool_df.empty:
                     position_data.append(pool_df)
                     # Crear leyenda con información de la posición
                     legend = f"{i+1}: {position['symbol']} ({position['project']} - {position['chain']})"
                     legends.append(legend)
-    
+
             if not position_data:
                 return None, "No se pudieron obtener datos históricos para ninguna de las posiciones."
-    
+
             # Crear figura de Plotly
             fig = go.Figure()
-    
+
             # Añadir línea para cada posición
             for i, data in enumerate(position_data):
                 fig.add_trace(go.Scatter(
@@ -421,7 +449,7 @@ class CryptoAgent:
                     line=dict(width=2),
                     marker=dict(size=6)
                 ))
-    
+
             # Configurar el diseño del gráfico
             fig.update_layout(
                 title="Evolución del APY en los últimos 7 días",
@@ -431,61 +459,21 @@ class CryptoAgent:
                 template="plotly_white",
                 height=600
             )
-    
+
             return fig, None
-    
+
         except Exception as e:
             return None, f"Error al generar el gráfico comparativo: {str(e)}"
-
-    def get_ai_response(self, context):
-        """Genera respuestas conversacionales según el contexto"""
-        search_responses = [
-            "Analizando datos de la blockchain en tiempo real...",
-            "Explorando las oportunidades DeFi disponibles ahora mismo...",
-            "Rastreando los mejores rendimientos en el ecosistema cripto...",
-            "Consultando Smart Contracts en múltiples blockchains...",
-            "Procesando datos on-chain para encontrar las mejores opciones...",
-            "Evaluando pools de liquidez y sus rendimientos actuales...",
-            "Comparando protocolos DeFi según tus criterios...",
-            "Buscando oportunidades que maximicen tu APY con el menor riesgo..."
-        ]
-    
-        details_responses = [
-            "Profundizando en los datos de esta posición...",
-            "Analizando métricas detalladas de este protocolo...",
-            "Extrayendo información completa de este Smart Contract...",
-            "Verificando la composición y seguridad de esta pool...",
-            "Calculando estadísticas históricas de rendimiento..."
-        ]
-    
-        chart_responses = [
-            "Visualizando tendencias históricas para estas posiciones...",
-            "Generando análisis comparativo de rendimientos en el tiempo...",
-            "Trazando la evolución del APY durante el período seleccionado...",
-            "Creando visualización para evaluar la estabilidad del rendimiento..."
-        ]
-    
-        if context == "search":
-            import random
-            return random.choice(search_responses)
-        elif context == "details":
-            import random
-            return random.choice(details_responses)
-        elif context == "chart":
-            import random
-            return random.choice(chart_responses)
-        else:
-            return "Procesando tu solicitud en el ecosistema DeFi..."
 
     def process_query(self, query):
         """Procesa la consulta del usuario de manera inteligente"""
         query_lower = query.lower()
-    
+
         # Verificar si es una solicitud de reseteo
         if any(word in query_lower for word in ["reset", "resetear", "borrar", "limpiar", "reiniciar"]):
             self.reset_state()
             return "Variables reseteadas. Ahora puedes establecer nuevos criterios de búsqueda."
-    
+
         # Verificar si es una solicitud de gráfico comparativo
         if self.detect_chart_request(query):
             ai_message = self.get_ai_response("chart")
@@ -493,7 +481,7 @@ class CryptoAgent:
             if error:
                 return f"{ai_message}\n\n{error}"
             return f"{ai_message}\n\nGráfico comparativo de APY de las últimas oportunidades:", "chart", fig
-    
+
         # Verificar si el usuario está pidiendo detalles sobre una posición específica
         position_index = self.detect_position_request(query)
         if position_index is not None:
@@ -502,7 +490,7 @@ class CryptoAgent:
             if error:
                 return f"{ai_message}\n\n{error}"
             return f"{ai_message}\n\nDetalles de la posición {position_index + 1}:", "details", details
-    
+
         # Detectar y actualizar todas las variables mencionadas en la consulta
         updates = self.detect_all_variables(query)
         update_message = None
@@ -510,27 +498,24 @@ class CryptoAgent:
             update_message = self.update_state(updates)
             if "error" in updates or (update_message and update_message.startswith("Blockchain '")):
                 return update_message  # Devolver mensaje de error
-    
+
         # Añadir mensaje AI para búsqueda
         ai_message = self.get_ai_response("search")
-    
+
         # Buscar y devolver resultados
         results, error = self.search_defi_opportunities()
-    
+
         if error:
             return f"{ai_message}\n\n{error}"
-    
+
         # Combinar mensajes y resultados
-        if update_message:
-            return f"{ai_message}\n\n{update_message}\n\nResultados de la búsqueda:", "results", results
-        else:
-            return f"{ai_message}\n\nResultados de la búsqueda:", "results", results
-    
-        def reset_state(self):
-            """Resetea todas las variables a None"""
-            for key in self.state:
-                self.state[key] = None
-            self.last_opportunities = []
+        return f"{ai_message}\n\nResultados de la búsqueda:", "results", results
+
+    def reset_state(self):
+        """Resetea todas las variables a None"""
+        for key in self.state:
+            self.state[key] = None
+        self.last_opportunities = []
 
 # Inicialización del estado de sesión
 if "agent" not in st.session_state:
@@ -595,15 +580,15 @@ if prompt:
 
         # Agregar mensaje a la sesión
         st.session_state.messages.append({
-            "role": "assistant", 
-            "content": message, 
-            "data_type": data_type, 
+            "role": "assistant",
+            "content": message,
+            "data_type": data_type,
             "data": data
         })
 
         # Mostrar mensaje
         st.chat_message("assistant").write(message)
-        
+
         # Mostrar datos según el tipo
         if data_type == "results" or data_type == "details":
             if data is not None:
@@ -614,9 +599,9 @@ if prompt:
     else:
         # Es un mensaje simple
         st.session_state.messages.append({
-            "role": "assistant", 
-            "content": response, 
-            "data_type": None, 
+            "role": "assistant",
+            "content": response,
+            "data_type": None,
             "data": None
         })
         st.chat_message("assistant").write(response)
