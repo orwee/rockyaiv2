@@ -58,62 +58,65 @@ class CryptoAgent:
         """Detecta todas las variables mencionadas en la consulta"""
         query_lower = query.lower()
         updates = {}
-
-        # Detectar blockchain
-        for chain_key, chain_value in self.chain_mapping.items():
-            blockchain_patterns = [
-                r'blockchain\s+(?:de\s+)?'+chain_key,
-                r'en\s+'+chain_key,
-                r'de\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?'+chain_key,
-                chain_key+r'\s+(?:blockchain|cadena|red)',
-                r'selecciona(?:r)?\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?'+chain_key,
-                r'select\s+'+chain_key,
-                r'\b'+chain_key+r'\b'
-            ]
-
-            for pattern in blockchain_patterns:
-                if re.search(pattern, query_lower):
-                    updates["blockchain"] = chain_key
-                    break
-
-            if "blockchain" in updates:
-                break
-
-        # Detectar blockchain no soportada
-        blockchain_patterns = [
-            r'blockchain\s+(?:de\s+)?(\w+)',
-            r'en\s+(\w+)\b(?!\s+token)',
-            r'de\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?(\w+)',
-            r'(\w+)\s+(?:blockchain|cadena|red)',
-            r'selecciona(?:r)?\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?(\w+)'
-        ]
-
-        if "blockchain" not in updates:
-            for pattern in blockchain_patterns:
-                blockchain_match = re.search(pattern, query_lower)
-                if blockchain_match:
-                    chain = blockchain_match.group(1)
-                    if chain not in self.chain_mapping and chain not in ["a", "el", "la", "los", "las", "de", "del"]:
-                        return {"error": f"Blockchain '{chain}' no soportada. Las blockchains disponibles son: {', '.join(self.chain_mapping.keys())}"}
-
-        # Detectar token (simplificado para búsqueda libre)
+    
+        # PRIMERO detectar token para evitar conflictos con blockchain
+        # Detectar token (priorizar patrones que mencionan explícitamente "token")
         token_patterns = [
             r'token\s+(?:de\s+)?(\w+)',
             r'el\s+token\s+(?:de\s+)?(\w+)',
             r'(\w+)\s+token',
             r'selecciona(?:r)?\s+(?:el\s+)?token\s+(?:de\s+)?(\w+)',
-            r'buscar\s+(?:el\s+)?(?:token\s+)?(\w+)',
-            r'encontrar\s+(?:el\s+)?(?:token\s+)?(\w+)'
+            r'buscar?\s+(?:el\s+)?token\s+(?:de\s+)?(\w+)',
+            r'encontrar?\s+(?:el\s+)?token\s+(?:de\s+)?(\w+)',
+            r'busca\s+(?:el\s+)?token\s+(?:de\s+)?(\w+)'
         ]
-
+    
         for pattern in token_patterns:
             token_match = re.search(pattern, query_lower)
             if token_match:
                 token = token_match.group(1)
-                if token not in ["a", "el", "la", "los", "las", "de", "del"]:
+                if token and token not in ["a", "el", "la", "los", "las", "de", "del"]:
                     updates["token"] = token
                     break
-
+    
+        # Luego detectar blockchain, evitando detectar tokens como blockchains
+        if "token" not in updates:  # Solo buscar blockchain si no se detectó token explícitamente
+            for chain_key, chain_value in self.chain_mapping.items():
+                blockchain_patterns = [
+                    r'blockchain\s+(?:de\s+)?'+chain_key,
+                    r'en\s+'+chain_key,
+                    r'de\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?'+chain_key,
+                    chain_key+r'\s+(?:blockchain|cadena|red)',
+                    r'selecciona(?:r)?\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?'+chain_key,
+                    r'select\s+'+chain_key,
+                    r'\b'+chain_key+r'\b'
+                ]
+    
+                for pattern in blockchain_patterns:
+                    if re.search(pattern, query_lower):
+                        updates["blockchain"] = chain_key
+                        break
+    
+                if "blockchain" in updates:
+                    break
+    
+            # Detectar blockchain no soportada solo si no se detectó token
+            blockchain_patterns = [
+                r'blockchain\s+(?:de\s+)?(\w+)',
+                r'en\s+(\w+)\b(?!\s+token)',
+                r'de\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?(\w+)',
+                r'(\w+)\s+(?:blockchain|cadena|red)',
+                r'selecciona(?:r)?\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?(\w+)'
+            ]
+    
+            if "blockchain" not in updates:
+                for pattern in blockchain_patterns:
+                    blockchain_match = re.search(pattern, query_lower)
+                    if blockchain_match:
+                        chain = blockchain_match.group(1)
+                        if chain not in self.chain_mapping and chain not in ["a", "el", "la", "los", "las", "de", "del"]:
+                            return {"error": f"Blockchain '{chain}' no soportada. Las blockchains disponibles son: {', '.join(self.chain_mapping.keys())}"}
+    
         # Detectar protocolo
         protocol_patterns = [
             r'protocol(?:o)?\s+(?:de\s+)?(\w+)',
@@ -122,7 +125,7 @@ class CryptoAgent:
             r'(\w+)\s+protocol(?:o)?',
             r'selecciona(?:r)?\s+(?:el\s+)?protocol(?:o)?\s+(?:de\s+)?(\w+)'
         ]
-
+    
         for pattern in protocol_patterns:
             protocol_match = re.search(pattern, query_lower)
             if protocol_match:
@@ -130,7 +133,7 @@ class CryptoAgent:
                 if protocol not in ["a", "el", "la", "los", "las", "de", "del"]:
                     updates["protocol"] = protocol
                     break
-
+    
         # Detectar TVL mínimo con soporte para K y M
         tvl_patterns = [
             r'tvl\s+(?:min(?:imo)?|mayor|superior)\s+(?:a|de)?\s*(\d+(?:\.\d+)?(?:[km])?)',
@@ -139,14 +142,14 @@ class CryptoAgent:
             r'minimo\s+(?:de\s+)?tvl\s+(?:de\s+)?(\d+(?:\.\d+)?(?:[km])?)',
             r'tvl\s+min(?:imo)?\s+(\d+(?:\.\d+)?(?:[km])?)'
         ]
-
+    
         for pattern in tvl_patterns:
             tvl_match = re.search(pattern, query_lower)
             if tvl_match:
                 tvl_value = tvl_match.group(1)
                 updates["tvl_min"] = self.process_tvl_value(tvl_value)
                 break
-
+    
         # Detectar APY mínimo
         apy_patterns = [
             r'apy\s+(?:min(?:imo)?|mayor|superior)\s+(?:a|de)?\s*(\d+(?:\.\d+)?)',
@@ -155,13 +158,13 @@ class CryptoAgent:
             r'minimo\s+(?:de\s+)?apy\s+(?:de\s+)?(\d+(?:\.\d+)?)',
             r'apy\s+min(?:imo)?\s+(\d+(?:\.\d+)?)'
         ]
-
+    
         for pattern in apy_patterns:
             apy_match = re.search(pattern, query_lower)
             if apy_match:
                 updates["apy_min"] = apy_match.group(1)
                 break
-
+    
         # Detectar búsqueda libre de token (si no se ha detectado mediante patrones)
         if "token" not in updates and not any(key in updates for key in ["blockchain", "tvl_min", "apy_min", "protocol", "error"]):
             # Verificar si hay palabras clave de búsqueda
@@ -171,12 +174,12 @@ class CryptoAgent:
                 common_words = ["me", "un", "una", "el", "la", "los", "las", "de", "del", "por", "para", "con", "y", "o", "a", "al", "se", "si", "en", "que", "por", "favor"]
                 for word in search_keywords + common_words:
                     query_lower = query_lower.replace(f" {word} ", " ")
-
+    
                 # Limpiar y obtener palabras que podrían ser tokens
                 tokens = query_lower.strip().split()
                 if tokens:
                     updates["token"] = tokens[0]  # Tomar la primera palabra como token
-
+    
         return updates
 
     def update_state(self, updates):
