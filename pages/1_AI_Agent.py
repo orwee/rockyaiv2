@@ -361,78 +361,78 @@ class CryptoAgent:
         return detail_df_transposed, None  # Devolver detalles y None para el error
     
     def generate_comparative_chart(self):
-        """Genera un gráfico comparativo de la evolución del APY para las posiciones encontradas"""
-        if not self.last_opportunities:
-            return None, "No hay posiciones para comparar. Primero realiza una búsqueda."
-            
-        try:
-            # Obtener datos históricos de cada posición
-            position_data = []
-            legends = []
-            
-            for i, position in enumerate(self.last_opportunities):
-                if 'pool' not in position:
-                    continue
-                    
-                pool_id = position['pool']
-                url = f'https://yields.llama.fi/chart/{pool_id}'
-                
-                response = requests.get(url)
-                if response.status_code != 200:
-                    continue
-                    
-                data = response.json()
-                if data["status"] != "success" or "data" not in data:
-                    continue
-                
-                # Crear un DataFrame para esta posición
-                pool_df = pd.DataFrame(data["data"])
-                
-                # Convertir timestamp a datetime
-                pool_df['timestamp'] = pd.to_datetime(pool_df['timestamp'])
-                
-                # Filtrar para los últimos 7 días
-                last_7_days = datetime.now() - timedelta(days=7)
-                pool_df = pool_df[pool_df['timestamp'] >= last_7_days]
-                
-                # Si hay datos, añadirlos a la lista
-                if not pool_df.empty:
-                    position_data.append(pool_df)
-                    # Crear leyenda con información de la posición
-                    legend = f"{i+1}: {position['symbol']} ({position['project']} - {position['chain']})"
-                    legends.append(legend)
-            
-            if not position_data:
-                return None, "No se pudieron obtener datos históricos para ninguna de las posiciones."
-                
-            # Crear figura de Plotly
-            fig = go.Figure()
-            
-            # Añadir línea para cada posición
-            for i, data in enumerate(position_data):
-                fig.add_trace(go.Scatter(
-                    x=data['timestamp'],
-                    y=data['apy'],
-                    mode='lines+markers',
-                    name=legends[i],
-                    line=dict(width=2),
-                    marker=dict(size=6)
-                ))
-                
-            # Configurar el diseño del gráfico
-            fig.update_layout(
-                title="Evolución del APY en los últimos 7 días",
-                xaxis_title="Fecha",
-                yaxis_title="APY (%)",
-                legend_title="Posiciones",
-                template="plotly_white",
-                height=600
-            )
-            
-            return fig, None
-            
-        except Exception as e:
-            return None, f"Error al generar el gráfico comparativo: {str(e)}"
+    """Genera un gráfico comparativo de la evolución del APY para las posiciones encontradas"""
+    if not self.last_opportunities:
+        return None, "No hay posiciones para comparar. Primero realiza una búsqueda."
+
+    try:
+        # Obtener datos históricos de cada posición
+        position_data = []
+        legends = []
+
+        for i, position in enumerate(self.last_opportunities):
+            if 'pool' not in position:
+                continue
+
+            pool_id = position['pool']
+            url = f'https://yields.llama.fi/chart/{pool_id}'
+
+            response = requests.get(url)
+            if response.status_code != 200:
+                continue
+
+            data = response.json()
+            if data["status"] != "success" or "data" not in data:
+                continue
+
+            # Crear un DataFrame para esta posición
+            pool_df = pd.DataFrame(data["data"])
+
+            # Convertir timestamp a datetime y eliminar información de zona horaria
+            pool_df['timestamp'] = pd.to_datetime(pool_df['timestamp']).dt.tz_localize(None)
+
+            # Filtrar para los últimos 7 días
+            last_7_days = datetime.now() - timedelta(days=7)
+            pool_df = pool_df[pool_df['timestamp'] >= last_7_days]
+
+            # Si hay datos, añadirlos a la lista
+            if not pool_df.empty:
+                position_data.append(pool_df)
+                # Crear leyenda con información de la posición
+                legend = f"{i+1}: {position['symbol']} ({position['project']} - {position['chain']})"
+                legends.append(legend)
+
+        if not position_data:
+            return None, "No se pudieron obtener datos históricos para ninguna de las posiciones."
+
+        # Crear figura de Plotly
+        fig = go.Figure()
+
+        # Añadir línea para cada posición
+        for i, data in enumerate(position_data):
+            fig.add_trace(go.Scatter(
+                x=data['timestamp'],
+                y=data['apy'],
+                mode='lines+markers',
+                name=legends[i],
+                line=dict(width=2),
+                marker=dict(size=6)
+            ))
+
+        # Configurar el diseño del gráfico
+        fig.update_layout(
+            title="Evolución del APY en los últimos 7 días",
+            xaxis_title="Fecha",
+            yaxis_title="APY (%)",
+            legend_title="Posiciones",
+            template="plotly_white",
+            height=600
+        )
+
+        return fig, None
+
+    except Exception as e:
+        return None, f"Error al generar el gráfico comparativo: {str(e)}"
 
     def process_query(self, query):
         """Procesa la consulta del usuario de manera inteligente"""
