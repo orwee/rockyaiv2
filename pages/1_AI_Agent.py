@@ -437,30 +437,72 @@ class CryptoAgent:
         except Exception as e:
             return None, f"Error al generar el gráfico comparativo: {str(e)}"
 
+    def get_ai_response(self, context):
+    """Genera respuestas conversacionales según el contexto"""
+    search_responses = [
+        "Analizando datos de la blockchain en tiempo real...",
+        "Explorando las oportunidades DeFi disponibles ahora mismo...",
+        "Rastreando los mejores rendimientos en el ecosistema cripto...",
+        "Consultando Smart Contracts en múltiples blockchains...",
+        "Procesando datos on-chain para encontrar las mejores opciones...",
+        "Evaluando pools de liquidez y sus rendimientos actuales...",
+        "Comparando protocolos DeFi según tus criterios...",
+        "Buscando oportunidades que maximicen tu APY con el menor riesgo..."
+    ]
+
+    details_responses = [
+        "Profundizando en los datos de esta posición...",
+        "Analizando métricas detalladas de este protocolo...",
+        "Extrayendo información completa de este Smart Contract...",
+        "Verificando la composición y seguridad de esta pool...",
+        "Calculando estadísticas históricas de rendimiento..."
+    ]
+
+    chart_responses = [
+        "Visualizando tendencias históricas para estas posiciones...",
+        "Generando análisis comparativo de rendimientos en el tiempo...",
+        "Trazando la evolución del APY durante el período seleccionado...",
+        "Creando visualización para evaluar la estabilidad del rendimiento..."
+    ]
+
+    if context == "search":
+        import random
+        return random.choice(search_responses)
+    elif context == "details":
+        import random
+        return random.choice(details_responses)
+    elif context == "chart":
+        import random
+        return random.choice(chart_responses)
+    else:
+        return "Procesando tu solicitud en el ecosistema DeFi..."
+
     def process_query(self, query):
         """Procesa la consulta del usuario de manera inteligente"""
         query_lower = query.lower()
-
+    
         # Verificar si es una solicitud de reseteo
         if any(word in query_lower for word in ["reset", "resetear", "borrar", "limpiar", "reiniciar"]):
             self.reset_state()
             return "Variables reseteadas. Ahora puedes establecer nuevos criterios de búsqueda."
-            
+    
         # Verificar si es una solicitud de gráfico comparativo
         if self.detect_chart_request(query):
+            ai_message = self.get_ai_response("chart")
             fig, error = self.generate_comparative_chart()
             if error:
-                return error
-            return "Gráfico comparativo de APY de las últimas oportunidades:", "chart", fig
-
+                return f"{ai_message}\n\n{error}"
+            return f"{ai_message}\n\nGráfico comparativo de APY de las últimas oportunidades:", "chart", fig
+    
         # Verificar si el usuario está pidiendo detalles sobre una posición específica
         position_index = self.detect_position_request(query)
         if position_index is not None:
+            ai_message = self.get_ai_response("details")
             details, error = self.get_position_details(position_index)
             if error:
-                return error
-            return f"Detalles de la posición {position_index + 1}:", "details", details
-
+                return f"{ai_message}\n\n{error}"
+            return f"{ai_message}\n\nDetalles de la posición {position_index + 1}:", "details", details
+    
         # Detectar y actualizar todas las variables mencionadas en la consulta
         updates = self.detect_all_variables(query)
         update_message = None
@@ -468,24 +510,27 @@ class CryptoAgent:
             update_message = self.update_state(updates)
             if "error" in updates or (update_message and update_message.startswith("Blockchain '")):
                 return update_message  # Devolver mensaje de error
-
+    
+        # Añadir mensaje AI para búsqueda
+        ai_message = self.get_ai_response("search")
+    
         # Buscar y devolver resultados
         results, error = self.search_defi_opportunities()
-
+    
         if error:
-            return error
-
+            return f"{ai_message}\n\n{error}"
+    
         # Combinar mensajes y resultados
         if update_message:
-            return f"{update_message}\n\nResultados de la búsqueda:", "results", results
+            return f"{ai_message}\n\n{update_message}\n\nResultados de la búsqueda:", "results", results
         else:
-            return "Resultados de la búsqueda:", "results", results
-
-    def reset_state(self):
-        """Resetea todas las variables a None"""
-        for key in self.state:
-            self.state[key] = None
-        self.last_opportunities = []
+            return f"{ai_message}\n\nResultados de la búsqueda:", "results", results
+    
+        def reset_state(self):
+            """Resetea todas las variables a None"""
+            for key in self.state:
+                self.state[key] = None
+            self.last_opportunities = []
 
 # Inicialización del estado de sesión
 if "agent" not in st.session_state:
