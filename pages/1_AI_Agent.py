@@ -346,17 +346,36 @@ class CryptoAgent:
 
     def generate_result_analysis(self, results):
         """Genera un breve análisis de los resultados encontrados"""
-        if not results or len(results) == 0:
+        # Verificar correctamente si los resultados están vacíos
+        if results is None or (isinstance(results, pd.DataFrame) and results.empty):
             return ""
 
+        # Convertir DataFrame a lista de diccionarios si es necesario
+        if isinstance(results, pd.DataFrame):
+            results_list = results.to_dict('records')
+        else:
+            results_list = results
+
         # Analizar los datos para generar comentarios relevantes
-        protocols = set([r.get('project', '') for r in results])
-        chains = set([r.get('chain', '') for r in results])
-        max_apy = max([float(r.get('apy', '0%').replace('%', '').replace(',', '')) for r in results])
-        min_apy = min([float(r.get('apy', '0%').replace('%', '').replace(',', '')) for r in results])
+        protocols = set([r.get('project', '') for r in results_list])
+        chains = set([r.get('chain', '') for r in results_list])
+
+        # Extraer valores APY de manera segura
+        apys = []
+        for r in results_list:
+            apy_str = str(r.get('apy', '0%'))
+            # Eliminar % y comas, luego convertir a float
+            apy_str = apy_str.replace('%', '').replace(',', '')
+            try:
+                apys.append(float(apy_str))
+            except ValueError:
+                apys.append(0.0)
+
+        max_apy = max(apys) if apys else 0
+        min_apy = min(apys) if apys else 0
 
         analyses = [
-            f"He encontrado {len(results)} oportunidades con APYs entre {min_apy:.2f}% y {max_apy:.2f}%.",
+            f"He encontrado {len(results_list)} oportunidades con APYs entre {min_apy:.2f}% y {max_apy:.2f}%.",
             f"Las posiciones destacadas incluyen protocolos como {', '.join(list(protocols)[:3])}.",
             f"Estas oportunidades están disponibles en {len(chains)} blockchain{'s' if len(chains) > 1 else ''}: {', '.join(list(chains))}.",
             "La posición #1 muestra el mejor rendimiento en función de tu búsqueda."
@@ -613,7 +632,8 @@ class CryptoAgent:
 
         # Obtener comentario de resultado y análisis
         result_comment = self.get_ai_response("result_comment")
-        result_analysis = self.generate_result_analysis(results) if results is not None else ""
+        # Arreglo: verificar correctamente si resultados están vacíos
+        result_analysis = self.generate_result_analysis(results)
 
         # Combinar mensajes y resultados
         if result_analysis:
