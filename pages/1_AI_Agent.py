@@ -414,4 +414,4 @@ if prompt:
         st.chat_message("assistant").write(response)
 
     # Actualizar sidebar
-    st.experimental_rerun()
+    #st.experimental_rerun()
