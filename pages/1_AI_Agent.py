@@ -438,44 +438,44 @@ class CryptoAgent:
             return None, f"Error al generar el gráfico comparativo: {str(e)}"
 
     def get_ai_response(self, context):
-    """Genera respuestas conversacionales según el contexto"""
-    search_responses = [
-        "Analizando datos de la blockchain en tiempo real...",
-        "Explorando las oportunidades DeFi disponibles ahora mismo...",
-        "Rastreando los mejores rendimientos en el ecosistema cripto...",
-        "Consultando Smart Contracts en múltiples blockchains...",
-        "Procesando datos on-chain para encontrar las mejores opciones...",
-        "Evaluando pools de liquidez y sus rendimientos actuales...",
-        "Comparando protocolos DeFi según tus criterios...",
-        "Buscando oportunidades que maximicen tu APY con el menor riesgo..."
-    ]
-
-    details_responses = [
-        "Profundizando en los datos de esta posición...",
-        "Analizando métricas detalladas de este protocolo...",
-        "Extrayendo información completa de este Smart Contract...",
-        "Verificando la composición y seguridad de esta pool...",
-        "Calculando estadísticas históricas de rendimiento..."
-    ]
-
-    chart_responses = [
-        "Visualizando tendencias históricas para estas posiciones...",
-        "Generando análisis comparativo de rendimientos en el tiempo...",
-        "Trazando la evolución del APY durante el período seleccionado...",
-        "Creando visualización para evaluar la estabilidad del rendimiento..."
-    ]
-
-    if context == "search":
-        import random
-        return random.choice(search_responses)
-    elif context == "details":
-        import random
-        return random.choice(details_responses)
-    elif context == "chart":
-        import random
-        return random.choice(chart_responses)
-    else:
-        return "Procesando tu solicitud en el ecosistema DeFi..."
+        """Genera respuestas conversacionales según el contexto"""
+        search_responses = [
+            "Analizando datos de la blockchain en tiempo real...",
+            "Explorando las oportunidades DeFi disponibles ahora mismo...",
+            "Rastreando los mejores rendimientos en el ecosistema cripto...",
+            "Consultando Smart Contracts en múltiples blockchains...",
+            "Procesando datos on-chain para encontrar las mejores opciones...",
+            "Evaluando pools de liquidez y sus rendimientos actuales...",
+            "Comparando protocolos DeFi según tus criterios...",
+            "Buscando oportunidades que maximicen tu APY con el menor riesgo..."
+        ]
+    
+        details_responses = [
+            "Profundizando en los datos de esta posición...",
+            "Analizando métricas detalladas de este protocolo...",
+            "Extrayendo información completa de este Smart Contract...",
+            "Verificando la composición y seguridad de esta pool...",
+            "Calculando estadísticas históricas de rendimiento..."
+        ]
+    
+        chart_responses = [
+            "Visualizando tendencias históricas para estas posiciones...",
+            "Generando análisis comparativo de rendimientos en el tiempo...",
+            "Trazando la evolución del APY durante el período seleccionado...",
+            "Creando visualización para evaluar la estabilidad del rendimiento..."
+        ]
+    
+        if context == "search":
+            import random
+            return random.choice(search_responses)
+        elif context == "details":
+            import random
+            return random.choice(details_responses)
+        elif context == "chart":
+            import random
+            return random.choice(chart_responses)
+        else:
+            return "Procesando tu solicitud en el ecosistema DeFi..."
 
     def process_query(self, query):
         """Procesa la consulta del usuario de manera inteligente"""
