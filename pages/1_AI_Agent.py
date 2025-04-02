@@ -45,6 +45,50 @@ class CryptoAgent:
             "base": "Base"
         }
 
+        # Lista de palabras comunes que no deben ser tratadas como tokens
+        self.common_words = [
+            "a", "al", "algo", "algunas", "algunos", "ante", "antes", "como", "con", "contra",
+            "cual", "cuando", "de", "del", "desde", "donde", "durante", "e", "el", "ella",
+            "ellas", "ellos", "en", "entre", "era", "erais", "eran", "eras", "eres", "es",
+            "esa", "esas", "ese", "eso", "esos", "esta", "estaba", "estabais", "estaban",
+            "estabas", "estad", "estada", "estadas", "estado", "estados", "estamos", "estando",
+            "estar", "estaremos", "estará", "estarán", "estarás", "estaré", "estaréis",
+            "estaría", "estaríais", "estaríamos", "estarían", "estarías", "estas", "este",
+            "estemos", "esto", "estos", "estoy", "estuve", "estuviera", "estuvierais",
+            "estuvieran", "estuvieras", "estuvieron", "estuviese", "estuvieseis", "estuviesen",
+            "estuvieses", "estuvimos", "estuviste", "estuvisteis", "estuviéramos",
+            "estuviésemos", "estuvo", "está", "estábamos", "estáis", "están", "estás", "esté",
+            "estéis", "estén", "estés", "fue", "fuera", "fuerais", "fueran", "fueras",
+            "fueron", "fuese", "fueseis", "fuesen", "fueses", "fui", "fuimos", "fuiste",
+            "fuisteis", "fuéramos", "fuésemos", "ha", "habida", "habidas", "habido", "habidos",
+            "habiendo", "habremos", "habrá", "habrán", "habrás", "habré", "habréis", "habría",
+            "habríais", "habríamos", "habrían", "habrías", "habéis", "había", "habíais",
+            "habíamos", "habían", "habías", "han", "has", "hasta", "hay", "haya", "hayamos",
+            "hayan", "hayas", "hayáis", "he", "hemos", "hube", "hubiera", "hubierais",
+            "hubieran", "hubieras", "hubieron", "hubiese", "hubieseis", "hubiesen", "hubieses",
+            "hubimos", "hubiste", "hubisteis", "hubiéramos", "hubiésemos", "hubo", "la", "las",
+            "le", "les", "lo", "los", "me", "mi", "mis", "mucho", "muchos", "muy", "más",
+            "mí", "mía", "mías", "mío", "míos", "nada", "ni", "no", "nos", "nosotras",
+            "nosotros", "nuestra", "nuestras", "nuestro", "nuestros", "o", "os", "otra",
+            "otras", "otro", "otros", "para", "pero", "poco", "por", "porque", "que",
+            "quien", "quienes", "qué", "se", "sea", "seamos", "sean", "seas", "seremos",
+            "será", "serán", "serás", "seré", "seréis", "sería", "seríais", "seríamos",
+            "serían", "serías", "seáis", "si", "sido", "siendo", "sin", "sobre", "sois",
+            "somos", "son", "soy", "su", "sus", "suya", "suyas", "suyo", "suyos", "sí",
+            "también", "tanto", "te", "tendremos", "tendrá", "tendrán", "tendrás", "tendré",
+            "tendréis", "tendría", "tendríais", "tendríamos", "tendrían", "tendrías", "tened",
+            "tenemos", "tenga", "tengamos", "tengan", "tengas", "tengo", "tengáis", "tenida",
+            "tenidas", "tenido", "tenidos", "teniendo", "tenéis", "tenía", "teníais",
+            "teníamos", "tenían", "tenías", "ti", "tiene", "tienen", "tienes", "todo",
+            "todos", "tu", "tus", "tuve", "tuviera", "tuvierais", "tuvieran", "tuvieras",
+            "tuvieron", "tuviese", "tuvieseis", "tuviesen", "tuvieses", "tuvimos", "tuviste",
+            "tuvisteis", "tuviéramos", "tuviésemos", "tuvo", "tuya", "tuyas", "tuyo", "tuyos",
+            "tú", "un", "una", "uno", "unos", "vosotras", "vosotros", "vuestra", "vuestras",
+            "vuestro", "vuestros", "y", "ya", "yo", "él", "éramos", "ver", "dame", "quiero",
+            "necesito", "haz", "hazme", "mostrar", "muestra", "muestrame", "dime", "cuál",
+            "cuales", "qué", "que", "deseo", "obtener", "conseguir", "listar", "hay"
+        ]
+
     def process_tvl_value(self, value_str):
         """Procesa valores de TVL con K y M"""
         value_str = value_str.strip().lower()
@@ -76,7 +120,8 @@ class CryptoAgent:
             token_match = re.search(pattern, query_lower)
             if token_match:
                 token = token_match.group(1)
-                if token and token not in ["a", "el", "la", "los", "las", "de", "del"]:
+                # Verificamos que el token no sea una palabra común y tenga suficiente longitud
+                if token and len(token) > 1:#token not in self.common_words
                     updates["token"] = token
                     break
 
@@ -115,7 +160,7 @@ class CryptoAgent:
                     blockchain_match = re.search(pattern, query_lower)
                     if blockchain_match:
                         chain = blockchain_match.group(1)
-                        if chain not in self.chain_mapping and chain not in ["a", "el", "la", "los", "las", "de", "del"]:
+                        if chain not in self.chain_mapping and chain not in self.common_words:
                             return {"error": f"Blockchain '{chain}' no soportada. Las blockchains disponibles son: {', '.join(self.chain_mapping.keys())}"}
 
         # Detectar protocolo
@@ -131,7 +176,7 @@ class CryptoAgent:
             protocol_match = re.search(pattern, query_lower)
             if protocol_match:
                 protocol = protocol_match.group(1)
-                if protocol not in ["a", "el", "la", "los", "las", "de", "del"]:
+                if protocol not in self.common_words and len(protocol) > 1:
                     updates["protocol"] = protocol
                     break
 
@@ -172,19 +217,18 @@ class CryptoAgent:
             search_keywords = ["buscar", "encontrar", "busca", "encuentra", "hallar", "mostrar", "ver", "listar"]
             if any(keyword in query_lower for keyword in search_keywords):
                 # Eliminar palabras clave y palabras comunes
-                common_words = ["me", "un", "una", "el", "la", "los", "las", "de", "del", "por", "para", "con", "y", "o", "a", "al", "se", "si", "en", "que", "por", "favor"]
-                for word in search_keywords + common_words:
-                    query_lower = query_lower.replace(f" {word} ", " ")
+                for word in search_keywords + self.common_words:
+                    query_lower = re.sub(r'\b' + word + r'\b', ' ', query_lower)
 
                 # Limpiar y obtener palabras que podrían ser tokens
-                tokens = query_lower.strip().split()
+                tokens = [t for t in query_lower.strip().split() if len(t) > 1 and t not in self.common_words]
                 if tokens:
                     updates["token"] = tokens[0]  # Tomar la primera palabra como token
 
         return updates
 
     def update_state(self, updates):
-        """Actualiza el estado con las variables detectadas"""
+        """Actualiza el estado con las variables detectadas sin retornar mensajes"""
         if not updates:
             return None
 
@@ -192,11 +236,11 @@ class CryptoAgent:
         if "error" in updates:
             return updates["error"]
 
-        # Actualizar el estado sin retornar mensajes
+        # Actualizar el estado silenciosamente
         for key, value in updates.items():
             self.state[key] = value
 
-        # No retornamos mensaje de actualización, solo actualizamos silenciosamente
+        # Retornar cadena vacía para evitar mensajes
         return ""
 
     def detect_position_request(self, query):
@@ -278,14 +322,51 @@ class CryptoAgent:
             "Creando visualización para evaluar la estabilidad del rendimiento..."
         ]
 
+        result_comments = [
+            "¡Aquí tienes los resultados encontrados por Orvee Intelligence!",
+            "Orvee Intelligence ha localizado estas oportunidades para ti.",
+            "Resultados analizados y verificados por Orvee Intelligence.",
+            "Mi algoritmo Orvee ha identificado estas posiciones prometedoras.",
+            "Según Orvee Intelligence, estas son las mejores opciones disponibles.",
+            "Orvee ha completado el análisis. Estas son las oportunidades destacadas.",
+            "Resultados procesados. Orvee Intelligence recomienda estas posiciones.",
+            "Análisis DeFi completado por Orvee Intelligence con éxito."
+        ]
+
         if context == "search":
             return random.choice(search_responses)
         elif context == "details":
             return random.choice(details_responses)
         elif context == "chart":
             return random.choice(chart_responses)
+        elif context == "result_comment":
+            return random.choice(result_comments)
         else:
             return "Procesando tu solicitud en el ecosistema DeFi..."
+
+    def generate_result_analysis(self, results):
+        """Genera un breve análisis de los resultados encontrados"""
+        if not results or len(results) == 0:
+            return ""
+
+        # Analizar los datos para generar comentarios relevantes
+        protocols = set([r.get('project', '') for r in results])
+        chains = set([r.get('chain', '') for r in results])
+        max_apy = max([float(r.get('apy', '0%').replace('%', '').replace(',', '')) for r in results])
+        min_apy = min([float(r.get('apy', '0%').replace('%', '').replace(',', '')) for r in results])
+
+        analyses = [
+            f"He encontrado {len(results)} oportunidades con APYs entre {min_apy:.2f}% y {max_apy:.2f}%.",
+            f"Las posiciones destacadas incluyen protocolos como {', '.join(list(protocols)[:3])}.",
+            f"Estas oportunidades están disponibles en {len(chains)} blockchain{'s' if len(chains) > 1 else ''}: {', '.join(list(chains))}.",
+            "La posición #1 muestra el mejor rendimiento en función de tu búsqueda."
+        ]
+
+        # Generar análisis aleatorio para no ser repetitivo
+        analysis_count = min(2, len(analyses))
+        selected_analyses = random.sample(analyses, analysis_count)
+
+        return " ".join(selected_analyses)
 
     def search_defi_opportunities(self):
         """Busca oportunidades DeFi que cumplan con los criterios actuales"""
@@ -493,11 +574,12 @@ class CryptoAgent:
 
         # Detectar y actualizar todas las variables mencionadas en la consulta
         updates = self.detect_all_variables(query)
-        update_message = None
+        if updates and "error" in updates:
+            return updates["error"]  # Devolver mensaje de error
+
+        # Actualizar estado sin mensajes
         if updates:
-            update_message = self.update_state(updates)
-            if "error" in updates or (update_message and update_message.startswith("Blockchain '")):
-                return update_message  # Devolver mensaje de error
+            self.update_state(updates)
 
         # Añadir mensaje AI para búsqueda
         ai_message = self.get_ai_response("search")
@@ -508,8 +590,15 @@ class CryptoAgent:
         if error:
             return f"{ai_message}\n\n{error}"
 
+        # Obtener comentario de resultado y análisis
+        result_comment = self.get_ai_response("result_comment")
+        result_analysis = self.generate_result_analysis(results) if results else ""
+
         # Combinar mensajes y resultados
-        return f"{ai_message}\n\nResultados de la búsqueda:", "results", results
+        if result_analysis:
+            return f"{ai_message}\n\n{result_comment} {result_analysis}", "results", results
+        else:
+            return f"{ai_message}\n\n{result_comment}", "results", results
 
     def reset_state(self):
         """Resetea todas las variables a None"""
