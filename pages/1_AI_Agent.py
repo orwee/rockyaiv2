@@ -3,6 +3,9 @@ import re
 import requests
 import json
 import streamlit as st
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+import numpy as np
 
 # Page configuration
 st.set_page_config(
@@ -233,6 +236,25 @@ class CryptoAgent:
                     return None
 
         return None
+    
+    def detect_chart_request(self, query):
+        """Detecta si el usuario está pidiendo un gráfico comparativo"""
+        query_lower = query.lower()
+        
+        # Patrones para detectar solicitudes de gráficos
+        chart_patterns = [
+            r'(?:haz|crea|genera|muestra|visualiza)(?:me)?\s+(?:un)?\s*(?:grafico|gráfico|chart|visualizacion|visualización)',
+            r'(?:comparar|compara)(?:me)?\s+(?:las)?\s*(?:oportunidades|posiciones|pools)',
+            r'(?:ver|mostrar|visualizar)\s+(?:la)?\s*(?:evolucion|evolución|tendencia|historia)',
+            r'(?:grafico|gráfico|chart)\s+(?:comparativo|de comparacion|comparación)',
+            r'(?:evolución|evolucion)\s+(?:del|de la|de)?\s*apy'
+        ]
+        
+        for pattern in chart_patterns:
+            if re.search(pattern, query_lower):
+                return True
+                
+        return False
 
     def search_defi_opportunities(self):
         """Busca oportunidades DeFi que cumplan con los criterios actuales"""
@@ -296,7 +318,8 @@ class CryptoAgent:
                     "tvlUsd": f"${opp['tvlUsd']:,.2f}",
                     "apy": f"{opp['apy']:.2f}%",
                     "ilRisk": opp["ilRisk"],
-                    "exposure": opp["exposure"]
+                    "exposure": opp["exposure"],
+                    "pool": opp["pool"]  # Añadimos el ID de la pool para poder obtener el gráfico
                 }
                 results.append(result)
 
@@ -336,6 +359,80 @@ class CryptoAgent:
         detail_df_transposed.columns = ['Característica', 'Valor']
 
         return detail_df_transposed, None  # Devolver detalles y None para el error
+    
+    def generate_comparative_chart(self):
+        """Genera un gráfico comparativo de la evolución del APY para las posiciones encontradas"""
+        if not self.last_opportunities:
+            return None, "No hay posiciones para comparar. Primero realiza una búsqueda."
+            
+        try:
+            # Obtener datos históricos de cada posición
+            position_data = []
+            legends = []
+            
+            for i, position in enumerate(self.last_opportunities):
+                if 'pool' not in position:
+                    continue
+                    
+                pool_id = position['pool']
+                url = f'https://yields.llama.fi/chart/{pool_id}'
+                
+                response = requests.get(url)
+                if response.status_code != 200:
+                    continue
+                    
+                data = response.json()
+                if data["status"] != "success" or "data" not in data:
+                    continue
+                
+                # Crear un DataFrame para esta posición
+                pool_df = pd.DataFrame(data["data"])
+                
+                # Convertir timestamp a datetime
+                pool_df['timestamp'] = pd.to_datetime(pool_df['timestamp'])
+                
+                # Filtrar para los últimos 7 días
+                last_7_days = datetime.now() - timedelta(days=7)
+                pool_df = pool_df[pool_df['timestamp'] >= last_7_days]
+                
+                # Si hay datos, añadirlos a la lista
+                if not pool_df.empty:
+                    position_data.append(pool_df)
+                    # Crear leyenda con información de la posición
+                    legend = f"{i+1}: {position['symbol']} ({position['project']} - {position['chain']})"
+                    legends.append(legend)
+            
+            if not position_data:
+                return None, "No se pudieron obtener datos históricos para ninguna de las posiciones."
+                
+            # Crear figura de Plotly
+            fig = go.Figure()
+            
+            # Añadir línea para cada posición
+            for i, data in enumerate(position_data):
+                fig.add_trace(go.Scatter(
+                    x=data['timestamp'],
+                    y=data['apy'],
+                    mode='lines+markers',
+                    name=legends[i],
+                    line=dict(width=2),
+                    marker=dict(size=6)
+                ))
+                
+            # Configurar el diseño del gráfico
+            fig.update_layout(
+                title="Evolución del APY en los últimos 7 días",
+                xaxis_title="Fecha",
+                yaxis_title="APY (%)",
+                legend_title="Posiciones",
+                template="plotly_white",
+                height=600
+            )
+            
+            return fig, None
+            
+        except Exception as e:
+            return None, f"Error al generar el gráfico comparativo: {str(e)}"
 
     def process_query(self, query):
         """Procesa la consulta del usuario de manera inteligente"""
@@ -345,6 +442,13 @@ class CryptoAgent:
         if any(word in query_lower for word in ["reset", "resetear", "borrar", "limpiar", "reiniciar"]):
             self.reset_state()
             return "Variables reseteadas. Ahora puedes establecer nuevos criterios de búsqueda."
+            
+        # Verificar si es una solicitud de gráfico comparativo
+        if self.detect_chart_request(query):
+            fig, error = self.generate_comparative_chart()
+            if error:
+                return error
+            return "Gráfico comparativo de APY de las últimas oportunidades:", "chart", fig
 
         # Verificar si el usuario está pidiendo detalles sobre una posición específica
         position_index = self.detect_position_request(query)
@@ -352,14 +456,14 @@ class CryptoAgent:
             details, error = self.get_position_details(position_index)
             if error:
                 return error
-            return f"Detalles de la posición {position_index + 1}:", details
+            return f"Detalles de la posición {position_index + 1}:", "details", details
 
         # Detectar y actualizar todas las variables mencionadas en la consulta
         updates = self.detect_all_variables(query)
         update_message = None
         if updates:
             update_message = self.update_state(updates)
-            if "error" in updates or update_message.startswith("Blockchain '"):
+            if "error" in updates or (update_message and update_message.startswith("Blockchain '")):
                 return update_message  # Devolver mensaje de error
 
         # Buscar y devolver resultados
@@ -370,9 +474,9 @@ class CryptoAgent:
 
         # Combinar mensajes y resultados
         if update_message:
-            return f"{update_message}\n\nResultados de la búsqueda:", results
+            return f"{update_message}\n\nResultados de la búsqueda:", "results", results
         else:
-            return "Resultados de la búsqueda:", results
+            return "Resultados de la búsqueda:", "results", results
 
     def reset_state(self):
         """Resetea todas las variables a None"""
@@ -407,7 +511,7 @@ if st.session_state.agent:
     if st.sidebar.button("Resetear criterios"):
         agent.reset_state()
         st.sidebar.success("Criterios reseteados")
-        st.rerun()  # Reemplazado experimental_rerun por rerun
+        st.rerun()
 
 # Mostrar mensajes anteriores
 for message in st.session_state.messages:
@@ -416,9 +520,14 @@ for message in st.session_state.messages:
     else:
         st.chat_message("assistant").write(message["content"])
 
-        # Si hay tabla de resultados, mostrarla
-        if "data" in message and message["data"] is not None:
-            st.dataframe(message["data"], use_container_width=True)
+        # Si hay datos para mostrar
+        if "data_type" in message and "data" in message:
+            if message["data_type"] == "results" or message["data_type"] == "details":
+                # Mostrar tabla de resultados o detalles
+                st.dataframe(message["data"], use_container_width=True)
+            elif message["data_type"] == "chart" and message["data"] is not None:
+                # Mostrar gráfico
+                st.plotly_chart(message["data"], use_container_width=True)
 
 # Input del usuario
 prompt = st.chat_input("¿Qué quieres buscar? (Ej: 'Token ETH en Arbitrum con TVL mínimo 1M')")
@@ -433,20 +542,36 @@ if prompt:
     response = agent.process_query(prompt)
 
     # Verificar si la respuesta contiene datos
-    if isinstance(response, tuple) and len(response) == 2:
-        message, data = response
+    if isinstance(response, tuple) and len(response) == 3:
+        message, data_type, data = response
 
         # Agregar mensaje a la sesión
-        st.session_state.messages.append({"role": "assistant", "content": message, "data": data})
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": message, 
+            "data_type": data_type, 
+            "data": data
+        })
 
-        # Mostrar mensaje y datos
+        # Mostrar mensaje
         st.chat_message("assistant").write(message)
-        if data is not None:
-            st.dataframe(data, use_container_width=True)
+        
+        # Mostrar datos según el tipo
+        if data_type == "results" or data_type == "details":
+            if data is not None:
+                st.dataframe(data, use_container_width=True)
+        elif data_type == "chart":
+            if data is not None:
+                st.plotly_chart(data, use_container_width=True)
     else:
         # Es un mensaje simple
-        st.session_state.messages.append({"role": "assistant", "content": response, "data": None})
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": response, 
+            "data_type": None, 
+            "data": None
+        })
         st.chat_message("assistant").write(response)
 
     # Actualizar sidebar
-    st.rerun()  # Reemplazado experimental_rerun por rerun
+    st.rerun()
