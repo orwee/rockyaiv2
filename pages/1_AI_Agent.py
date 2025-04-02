@@ -121,7 +121,7 @@ class CryptoAgent:
             if token_match:
                 token = token_match.group(1)
                 # Verificamos que el token no sea una palabra común y tenga suficiente longitud
-                if token and len(token) > 1:#token not in self.common_words
+                if token and token not in self.common_words and len(token) > 1:
                     updates["token"] = token
                     break
 
@@ -368,6 +368,17 @@ class CryptoAgent:
 
         return " ".join(selected_analyses)
 
+    def safe_dataframe_for_streamlit(self, df):
+        """Convierte los valores problemáticos en el DataFrame para que sea compatible con Arrow/Streamlit"""
+        # Copia para evitar modificar el original
+        df = df.copy()
+
+        # Convertir todos los valores problemáticos a strings
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].apply(lambda x: str(x) if isinstance(x, (bool, dict, list)) else x)
+        return df
+
     def search_defi_opportunities(self):
         """Busca oportunidades DeFi que cumplan con los criterios actuales"""
         try:
@@ -429,13 +440,18 @@ class CryptoAgent:
                     "symbol": opp["symbol"],
                     "tvlUsd": f"${opp['tvlUsd']:,.2f}",
                     "apy": f"{opp['apy']:.2f}%",
-                    "ilRisk": opp["ilRisk"],
-                    "exposure": opp["exposure"],
+                    # Convertir valores booleanos a string para evitar errores de PyArrow
+                    "ilRisk": str(opp["ilRisk"]) if isinstance(opp["ilRisk"], bool) else opp["ilRisk"],
+                    "exposure": str(opp["exposure"]) if isinstance(opp["exposure"], (bool, dict, list)) else opp["exposure"],
                     "pool": opp["pool"]  # Añadimos el ID de la pool para poder obtener el gráfico
                 }
                 results.append(result)
 
-            return results, None  # Devolver resultados y None para el error
+            # Convertir a DataFrame y asegurar compatibilidad con Arrow
+            results_df = pd.DataFrame(results)
+            results_df = self.safe_dataframe_for_streamlit(results_df)
+
+            return results_df, None  # Devolver resultados y None para el error
 
         except Exception as e:
             return None, f"Error al buscar oportunidades DeFi: {str(e)}"
@@ -462,6 +478,8 @@ class CryptoAgent:
                 formatted_position[key] = ", ".join(value) if value else "Ninguno"
             elif key == 'underlyingTokens' and value:
                 formatted_position[key] = ", ".join(value) if value else "Ninguno"
+            elif isinstance(value, (bool, dict, list)):  # Convertir tipos problemáticos a strings
+                formatted_position[key] = str(value)
             else:
                 formatted_position[key] = value
 
@@ -469,6 +487,9 @@ class CryptoAgent:
         detail_df = pd.DataFrame([formatted_position])
         detail_df_transposed = detail_df.T.reset_index()
         detail_df_transposed.columns = ['Característica', 'Valor']
+
+        # Asegurar compatibilidad con Arrow
+        detail_df_transposed = self.safe_dataframe_for_streamlit(detail_df_transposed)
 
         return detail_df_transposed, None  # Devolver detalles y None para el error
 
@@ -592,7 +613,7 @@ class CryptoAgent:
 
         # Obtener comentario de resultado y análisis
         result_comment = self.get_ai_response("result_comment")
-        result_analysis = self.generate_result_analysis(results) if results else ""
+        result_analysis = self.generate_result_analysis(results) if results is not None else ""
 
         # Combinar mensajes y resultados
         if result_analysis:
