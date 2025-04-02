@@ -212,10 +212,19 @@ class CryptoAgent:
                 break
 
         # Detectar búsqueda libre de token (si no se ha detectado mediante patrones)
-        if "token" not in updates and not any(key in updates for key in ["blockchain", "tvl_min", "apy_min", "protocol", "error"]):
+        keys_to_check = ["blockchain", "tvl_min", "apy_min", "protocol", "error", "token"]
+        found_keys = [key for key in keys_to_check if key in updates]
+
+        if len(found_keys) == 0:  # No se detectó ningún parámetro
             # Verificar si hay palabras clave de búsqueda
             search_keywords = ["buscar", "encontrar", "busca", "encuentra", "hallar", "mostrar", "ver", "listar"]
-            if any(keyword in query_lower for keyword in search_keywords):
+            has_search_keyword = False
+            for keyword in search_keywords:
+                if keyword in query_lower:
+                    has_search_keyword = True
+                    break
+
+            if has_search_keyword:
                 # Eliminar palabras clave y palabras comunes
                 for word in search_keywords + self.common_words:
                     query_lower = re.sub(r'\b' + word + r'\b', ' ', query_lower)
@@ -346,38 +355,60 @@ class CryptoAgent:
 
     def generate_result_analysis(self, results):
         """Genera un breve análisis de los resultados encontrados"""
-        # Verificar correctamente si los resultados están vacíos
-        if results is None or (isinstance(results, pd.DataFrame) and results.empty):
+        # Verificar si results es None
+        if results is None:
             return ""
 
-        # Convertir DataFrame a lista de diccionarios si es necesario
+        # Verificar si results es un DataFrame vacío
         if isinstance(results, pd.DataFrame):
+            if results.empty:
+                return ""
             results_list = results.to_dict('records')
         else:
+            # Si no es un DataFrame, asumimos que es una lista
             results_list = results
 
-        # Analizar los datos para generar comentarios relevantes
-        protocols = set([r.get('project', '') for r in results_list])
-        chains = set([r.get('chain', '') for r in results_list])
+        # Si results_list está vacío o no es una lista, devolver cadena vacía
+        if not isinstance(results_list, list) or len(results_list) == 0:
+            return ""
 
-        # Extraer valores APY de manera segura
+        # Analizar los datos para generar comentarios relevantes
+        protocols = []
+        chains = []
         apys = []
+
         for r in results_list:
-            apy_str = str(r.get('apy', '0%'))
-            # Eliminar % y comas, luego convertir a float
-            apy_str = apy_str.replace('%', '').replace(',', '')
-            try:
-                apys.append(float(apy_str))
-            except ValueError:
-                apys.append(0.0)
+            if isinstance(r, dict):
+                # Extraer proyecto
+                project = r.get('project', '')
+                if project and project not in protocols:
+                    protocols.append(project)
+
+                # Extraer cadena
+                chain = r.get('chain', '')
+                if chain and chain not in chains:
+                    chains.append(chain)
+
+                # Extraer APY
+                apy_str = str(r.get('apy', '0%'))
+                # Eliminar % y comas, luego convertir a float
+                apy_str = apy_str.replace('%', '').replace(',', '')
+                try:
+                    apys.append(float(apy_str))
+                except ValueError:
+                    pass
+
+        # Verificar si tenemos suficientes datos para análisis
+        if not protocols or not chains or not apys:
+            return ""
 
         max_apy = max(apys) if apys else 0
         min_apy = min(apys) if apys else 0
 
         analyses = [
             f"He encontrado {len(results_list)} oportunidades con APYs entre {min_apy:.2f}% y {max_apy:.2f}%.",
-            f"Las posiciones destacadas incluyen protocolos como {', '.join(list(protocols)[:3])}.",
-            f"Estas oportunidades están disponibles en {len(chains)} blockchain{'s' if len(chains) > 1 else ''}: {', '.join(list(chains))}.",
+            f"Las posiciones destacadas incluyen protocolos como {', '.join(protocols[:3])}.",
+            f"Estas oportunidades están disponibles en {len(chains)} blockchain{'s' if len(chains) > 1 else ''}: {', '.join(chains)}.",
             "La posición #1 muestra el mejor rendimiento en función de tu búsqueda."
         ]
 
@@ -394,8 +425,7 @@ class CryptoAgent:
 
         # Convertir todos los valores problemáticos a strings
         for col in df.columns:
-            if df[col].dtype == 'object':
-                df[col] = df[col].apply(lambda x: str(x) if isinstance(x, (bool, dict, list)) else x)
+            df[col] = df[col].astype(str)  # Convertir toda la columna a strings
         return df
 
     def search_defi_opportunities(self):
@@ -442,14 +472,14 @@ class CryptoAgent:
             # Seleccionar las 5 mejores oportunidades
             top_opportunities = filtered_opps.head(5)
 
-            if top_opportunities.empty:
+            if len(top_opportunities.index) == 0:  # Usar len() en vez de .empty
                 self.last_opportunities = []
                 return None, "No se encontraron oportunidades que cumplan con los criterios actuales."
 
             # Guardar las oportunidades completas para consultas detalladas
             self.last_opportunities = top_opportunities.to_dict('records')
 
-            # Preparar los datos para mostrar en Streamlit
+            # Preparar los datos para mostrar en Streamlit como lista de diccionarios
             results = []
             for i, opp in enumerate(self.last_opportunities):
                 result = {
@@ -460,9 +490,9 @@ class CryptoAgent:
                     "tvlUsd": f"${opp['tvlUsd']:,.2f}",
                     "apy": f"{opp['apy']:.2f}%",
                     # Convertir valores booleanos a string para evitar errores de PyArrow
-                    "ilRisk": str(opp["ilRisk"]) if isinstance(opp["ilRisk"], bool) else opp["ilRisk"],
-                    "exposure": str(opp["exposure"]) if isinstance(opp["exposure"], (bool, dict, list)) else opp["exposure"],
-                    "pool": opp["pool"]  # Añadimos el ID de la pool para poder obtener el gráfico
+                    "ilRisk": str(opp["ilRisk"]),
+                    "exposure": str(opp["exposure"]),
+                    "pool": str(opp["pool"])  # Añadimos el ID de la pool para poder obtener el gráfico
                 }
                 results.append(result)
 
@@ -497,10 +527,8 @@ class CryptoAgent:
                 formatted_position[key] = ", ".join(value) if value else "Ninguno"
             elif key == 'underlyingTokens' and value:
                 formatted_position[key] = ", ".join(value) if value else "Ninguno"
-            elif isinstance(value, (bool, dict, list)):  # Convertir tipos problemáticos a strings
-                formatted_position[key] = str(value)
             else:
-                formatted_position[key] = value
+                formatted_position[key] = str(value)  # Convertir todo a string
 
         # Convertir a DataFrame para mostrarlo como tabla
         detail_df = pd.DataFrame([formatted_position])
@@ -548,7 +576,7 @@ class CryptoAgent:
                 pool_df = pool_df[pool_df['timestamp'] >= last_7_days]
 
                 # Si hay datos, añadirlos a la lista
-                if not pool_df.empty:
+                if len(pool_df.index) > 0:  # Usar len() en vez de .empty
                     position_data.append(pool_df)
                     # Crear leyenda con información de la posición
                     legend = f"{i+1}: {position['symbol']} ({position['project']} - {position['chain']})"
@@ -591,7 +619,14 @@ class CryptoAgent:
         query_lower = query.lower()
 
         # Verificar si es una solicitud de reseteo
-        if any(word in query_lower for word in ["reset", "resetear", "borrar", "limpiar", "reiniciar"]):
+        reset_words = ["reset", "resetear", "borrar", "limpiar", "reiniciar"]
+        is_reset = False
+        for word in reset_words:
+            if word in query_lower:
+                is_reset = True
+                break
+
+        if is_reset:
             self.reset_state()
             return "Variables reseteadas. Ahora puedes establecer nuevos criterios de búsqueda."
 
@@ -614,7 +649,9 @@ class CryptoAgent:
 
         # Detectar y actualizar todas las variables mencionadas en la consulta
         updates = self.detect_all_variables(query)
-        if updates and "error" in updates:
+        has_error = "error" in updates
+
+        if has_error:
             return updates["error"]  # Devolver mensaje de error
 
         # Actualizar estado sin mensajes
@@ -630,13 +667,19 @@ class CryptoAgent:
         if error:
             return f"{ai_message}\n\n{error}"
 
-        # Obtener comentario de resultado y análisis
+        # Obtener comentario de resultado
         result_comment = self.get_ai_response("result_comment")
-        # Arreglo: verificar correctamente si resultados están vacíos
-        result_analysis = self.generate_result_analysis(results)
+
+        # Generar análisis de resultados (sin operaciones booleanas con DataFrames)
+        result_analysis = ""
+        if results is not None:
+            if isinstance(results, pd.DataFrame) and len(results.index) > 0:
+                result_analysis = self.generate_result_analysis(results)
+            elif isinstance(results, list) and len(results) > 0:
+                result_analysis = self.generate_result_analysis(results)
 
         # Combinar mensajes y resultados
-        if result_analysis:
+        if result_analysis != "":
             return f"{ai_message}\n\n{result_comment} {result_analysis}", "results", results
         else:
             return f"{ai_message}\n\n{result_comment}", "results", results
@@ -663,7 +706,7 @@ Simplemente dime qué buscas y te mostraré opciones que cumplan tus requisitos.
 
 # Sidebar con variables actuales
 st.sidebar.header("Criterios actuales")
-if st.session_state.agent:
+if "agent" in st.session_state:
     agent = st.session_state.agent
     st.sidebar.markdown(f"**Blockchain:** {agent.state['blockchain'] or 'No especificado'}")
     st.sidebar.markdown(f"**Token:** {agent.state['token'] or 'No especificado'}")
@@ -684,11 +727,11 @@ for message in st.session_state.messages:
         st.chat_message("assistant").write(message["content"])
 
         # Si hay datos para mostrar
-        if "data_type" in message and "data" in message:
+        if "data_type" in message and "data" in message and message["data"] is not None:
             if message["data_type"] == "results" or message["data_type"] == "details":
                 # Mostrar tabla de resultados o detalles
                 st.dataframe(message["data"], use_container_width=True)
-            elif message["data_type"] == "chart" and message["data"] is not None:
+            elif message["data_type"] == "chart":
                 # Mostrar gráfico
                 st.plotly_chart(message["data"], use_container_width=True)
 
@@ -720,11 +763,10 @@ if prompt:
         st.chat_message("assistant").write(message)
 
         # Mostrar datos según el tipo
-        if data_type == "results" or data_type == "details":
-            if data is not None:
+        if data is not None:
+            if data_type == "results" or data_type == "details":
                 st.dataframe(data, use_container_width=True)
-        elif data_type == "chart":
-            if data is not None:
+            elif data_type == "chart":
                 st.plotly_chart(data, use_container_width=True)
     else:
         # Es un mensaje simple
