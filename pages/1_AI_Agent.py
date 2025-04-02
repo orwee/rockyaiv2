@@ -37,7 +37,8 @@ class CryptoAgent:
             "bsc": "BSC",
             "optimism": "Optimism",
             "fantom": "Fantom",
-            "cardano": "Cardano"
+            "cardano": "Cardano",
+            "base": "Base"
         }
 
     def process_tvl_value(self, value_str):
@@ -75,12 +76,31 @@ class CryptoAgent:
             if "blockchain" in updates:
                 break
 
-        # Detectar token
+        # Detectar blockchain no soportada
+        blockchain_patterns = [
+            r'blockchain\s+(?:de\s+)?(\w+)',
+            r'en\s+(\w+)\b(?!\s+token)',
+            r'de\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?(\w+)',
+            r'(\w+)\s+(?:blockchain|cadena|red)',
+            r'selecciona(?:r)?\s+(?:la\s+)?(?:blockchain|cadena|red)\s+(?:de\s+)?(\w+)'
+        ]
+
+        if "blockchain" not in updates:
+            for pattern in blockchain_patterns:
+                blockchain_match = re.search(pattern, query_lower)
+                if blockchain_match:
+                    chain = blockchain_match.group(1)
+                    if chain not in self.chain_mapping and chain not in ["a", "el", "la", "los", "las", "de", "del"]:
+                        return {"error": f"Blockchain '{chain}' no soportada. Las blockchains disponibles son: {', '.join(self.chain_mapping.keys())}"}
+
+        # Detectar token (simplificado para búsqueda libre)
         token_patterns = [
             r'token\s+(?:de\s+)?(\w+)',
             r'el\s+token\s+(?:de\s+)?(\w+)',
             r'(\w+)\s+token',
-            r'selecciona(?:r)?\s+(?:el\s+)?token\s+(?:de\s+)?(\w+)'
+            r'selecciona(?:r)?\s+(?:el\s+)?token\s+(?:de\s+)?(\w+)',
+            r'buscar\s+(?:el\s+)?(?:token\s+)?(\w+)',
+            r'encontrar\s+(?:el\s+)?(?:token\s+)?(\w+)'
         ]
 
         for pattern in token_patterns:
@@ -139,12 +159,31 @@ class CryptoAgent:
                 updates["apy_min"] = apy_match.group(1)
                 break
 
+        # Detectar búsqueda libre de token (si no se ha detectado mediante patrones)
+        if "token" not in updates and not any(key in updates for key in ["blockchain", "tvl_min", "apy_min", "protocol", "error"]):
+            # Verificar si hay palabras clave de búsqueda
+            search_keywords = ["buscar", "encontrar", "busca", "encuentra", "hallar", "mostrar", "ver", "listar"]
+            if any(keyword in query_lower for keyword in search_keywords):
+                # Eliminar palabras clave y palabras comunes
+                common_words = ["me", "un", "una", "el", "la", "los", "las", "de", "del", "por", "para", "con", "y", "o", "a", "al", "se", "si", "en", "que", "por", "favor"]
+                for word in search_keywords + common_words:
+                    query_lower = query_lower.replace(f" {word} ", " ")
+
+                # Limpiar y obtener palabras que podrían ser tokens
+                tokens = query_lower.strip().split()
+                if tokens:
+                    updates["token"] = tokens[0]  # Tomar la primera palabra como token
+
         return updates
 
     def update_state(self, updates):
         """Actualiza el estado con las variables detectadas"""
         if not updates:
             return None
+
+        # Verificar si hay error
+        if "error" in updates:
+            return updates["error"]
 
         messages = []
         for key, value in updates.items():
@@ -202,12 +241,12 @@ class CryptoAgent:
             response = requests.get('https://yields.llama.fi/pools')
 
             if response.status_code != 200:
-                return f"Error al consultar la API de DeFiLlama: {response.status_code}"
+                return None, f"Error al consultar la API de DeFiLlama: {response.status_code}"
 
             data = response.json()
 
             if data["status"] != "success" or "data" not in data:
-                return "Error en la respuesta de la API de DeFiLlama"
+                return None, "Error en la respuesta de la API de DeFiLlama"
 
             # Convertir los datos a un DataFrame para facilitar el filtrado
             opportunities = pd.DataFrame(data["data"])
@@ -291,7 +330,12 @@ class CryptoAgent:
             else:
                 formatted_position[key] = value
 
-        return formatted_position, None  # Devolver detalles y None para el error
+        # Convertir a DataFrame para mostrarlo como tabla
+        detail_df = pd.DataFrame([formatted_position])
+        detail_df_transposed = detail_df.T.reset_index()
+        detail_df_transposed.columns = ['Característica', 'Valor']
+
+        return detail_df_transposed, None  # Devolver detalles y None para el error
 
     def process_query(self, query):
         """Procesa la consulta del usuario de manera inteligente"""
@@ -308,13 +352,15 @@ class CryptoAgent:
             details, error = self.get_position_details(position_index)
             if error:
                 return error
-            return details, True  # Detalles y True para indicar que es detalle de posición
+            return f"Detalles de la posición {position_index + 1}:", details
 
         # Detectar y actualizar todas las variables mencionadas en la consulta
         updates = self.detect_all_variables(query)
         update_message = None
         if updates:
             update_message = self.update_state(updates)
+            if "error" in updates or update_message.startswith("Blockchain '"):
+                return update_message  # Devolver mensaje de error
 
         # Buscar y devolver resultados
         results, error = self.search_defi_opportunities()
@@ -324,9 +370,9 @@ class CryptoAgent:
 
         # Combinar mensajes y resultados
         if update_message:
-            return update_message, results
+            return f"{update_message}\n\nResultados de la búsqueda:", results
         else:
-            return "Búsqueda realizada con éxito", results
+            return "Resultados de la búsqueda:", results
 
     def reset_state(self):
         """Resetea todas las variables a None"""
@@ -361,7 +407,7 @@ if st.session_state.agent:
     if st.sidebar.button("Resetear criterios"):
         agent.reset_state()
         st.sidebar.success("Criterios reseteados")
-        st.experimental_rerun()
+        st.rerun()  # Reemplazado experimental_rerun por rerun
 
 # Mostrar mensajes anteriores
 for message in st.session_state.messages:
@@ -371,14 +417,8 @@ for message in st.session_state.messages:
         st.chat_message("assistant").write(message["content"])
 
         # Si hay tabla de resultados, mostrarla
-        if "data" in message and message["data"]:
-            if isinstance(message["data"], list):
-                # Mostrar tabla de resultados
-                df = pd.DataFrame(message["data"])
-                st.dataframe(df, use_container_width=True)
-            elif isinstance(message["data"], dict):
-                # Mostrar detalles de posición
-                st.json(message["data"])
+        if "data" in message and message["data"] is not None:
+            st.dataframe(message["data"], use_container_width=True)
 
 # Input del usuario
 prompt = st.chat_input("¿Qué quieres buscar? (Ej: 'Token ETH en Arbitrum con TVL mínimo 1M')")
@@ -392,26 +432,21 @@ if prompt:
     agent = st.session_state.agent
     response = agent.process_query(prompt)
 
-    # Verificar si la respuesta contiene detalles de posición
+    # Verificar si la respuesta contiene datos
     if isinstance(response, tuple) and len(response) == 2:
         message, data = response
 
-        if isinstance(data, bool) and data:  # Es detalle de posición
-            st.session_state.messages.append({"role": "assistant", "content": f"Detalles de la posición:", "data": message})
-            st.chat_message("assistant").write("Detalles de la posición:")
-            st.json(message)
-        else:
-            # Es resultado normal
-            st.session_state.messages.append({"role": "assistant", "content": message, "data": data})
-            st.chat_message("assistant").write(message)
+        # Agregar mensaje a la sesión
+        st.session_state.messages.append({"role": "assistant", "content": message, "data": data})
 
-            if data:
-                df = pd.DataFrame(data)
-                st.dataframe(df, use_container_width=True)
+        # Mostrar mensaje y datos
+        st.chat_message("assistant").write(message)
+        if data is not None:
+            st.dataframe(data, use_container_width=True)
     else:
         # Es un mensaje simple
         st.session_state.messages.append({"role": "assistant", "content": response, "data": None})
         st.chat_message("assistant").write(response)
 
     # Actualizar sidebar
-    #st.experimental_rerun()
+    st.rerun()  # Reemplazado experimental_rerun por rerun
